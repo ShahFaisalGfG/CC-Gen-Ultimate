@@ -14,6 +14,13 @@ $TorchIndex = @{
     cuda = "https://download.pytorch.org/whl/cu128"
     xpu  = "https://download.pytorch.org/whl/xpu"
 }
+# Local version label of each index's wheels. Pinning it matters: pip treats any installed
+# 2.8.0 wheel as satisfying "torch==2.8.0" and only swaps it for a label that sorts higher, so
+# an NVIDIA build made after an Intel build would otherwise keep the +xpu wheel.
+$TorchLocal = @{
+    cuda = "cu128"
+    xpu  = "xpu"
+}
 # Appended to installer and portable file names; the NVIDIA build keeps the plain names.
 $GpuSuffix = @{
     cuda = ""
@@ -31,7 +38,8 @@ function Install-GpuRuntime {
     #>
     param([Parameter(Mandatory)] [ValidateSet("cuda", "xpu")] [string]$Gpu)
 
-    python -m pip install --upgrade "torch==$TorchVersion" "torchaudio==$TorchVersion" --index-url $TorchIndex[$Gpu]
+    $Pin = "$TorchVersion+$($TorchLocal[$Gpu])"
+    python -m pip install --upgrade "torch==$Pin" "torchaudio==$Pin" --index-url $TorchIndex[$Gpu]
     if ($LASTEXITCODE -ne 0) { throw "Installing the $Gpu build of PyTorch failed (exit $LASTEXITCODE)" }
     python -m pip uninstall --yes onnxruntime
     python -m pip install --no-deps "onnxruntime-directml>=1.20"
