@@ -24,10 +24,29 @@ def _fake_translate(units, progress_cb=None, progress_num_cb=None, segment_cb=No
     return results
 
 
+class _FaithfulMeaning:
+    """Meaning check stand-in that finds every translation faithful, without loading a model."""
+
+    score = 0.9
+
+    def ensure(self, status_cb=None, progress_cb=None):
+        pass
+
+    def scores(self, sources, translations, target):
+        return [self.score] * len(sources)
+
+
+class _DriftingMeaning(_FaithfulMeaning):
+    score = 0.2
+
+
 @pytest.fixture
 def engine():
-    """Patch the translation engine factory and yield the fake engine."""
-    with patch("ccgen.core.tasks.translate.create_translation_engine") as create:
+    """Patch the translation engine factory and meaning check, and yield the fake engine."""
+    with (
+        patch("ccgen.core.tasks.translate.create_translation_engine") as create,
+        patch("ccgen.core.tasks.translate.MeaningCheck", _FaithfulMeaning),
+    ):
         fake = MagicMock(name="translator")
         fake.translate_segments.side_effect = _fake_translate
         create.return_value = fake
@@ -49,6 +68,18 @@ class TestConfig:
     def test_rejects_same_languages(self, tmp_path):
         with pytest.raises(ValueError, match="different from the source"):
             TranslateConfig(input_path=str(tmp_path / "a.srt"), source_lang="es", target_lang="es")
+
+    def test_rejects_an_unknown_model(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown translation model"):
+            TranslateConfig(input_path=str(tmp_path / "a.srt"), target_lang="es", engine="babelfish")
+
+    def test_rejects_a_pair_the_model_cannot_translate(self, tmp_path):
+        with pytest.raises(ValueError, match="OPUS-MT has no model from 'en' to 'ja'"):
+            TranslateConfig(input_path=str(tmp_path / "a.srt"), source_lang="en", target_lang="ja", engine="opus_mt")
+
+    def test_opus_mt_with_the_meaning_check_is_the_default(self, tmp_path):
+        cfg = TranslateConfig(input_path=str(tmp_path / "a_en.srt"), target_lang="ur")
+        assert (cfg.engine, cfg.meaning_check) == ("opus_mt", True)
 
 
 class TestRun:
@@ -101,3 +132,31 @@ class TestRun:
         cfg = TranslateConfig(input_path=_subtitle(tmp_path, "movie_es.srt"), source_lang="en", target_lang="es")
         result = TranslateTask(cfg).run()
         assert not result.success and "overwrite the input" in result.error
+
+    def test_lines_that_drift_from_the_original_are_reported(self, tmp_path, engine):
+        with patch("ccgen.core.tasks.translate.MeaningCheck", _DriftingMeaning):
+            cfg = TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es")
+            result = TranslateTask(cfg).run()
+        assert result.success, result.error
+        assert result.warnings == [
+            "2 line(s) may not say the same as the original (subtitle 1, 2). "
+            "Review them, or try another translation model in Preferences."
+        ]
+
+    def test_faithful_lines_raise_no_note(self, tmp_path, engine):
+        result = TranslateTask(TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es")).run()
+        assert result.warnings == []
+
+    def test_meaning_check_can_be_turned_off(self, tmp_path, engine):
+        with patch("ccgen.core.tasks.translate.MeaningCheck") as meaning:
+            cfg = TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es", meaning_check=False)
+            assert TranslateTask(cfg).run().success
+        meaning.assert_not_called()
+
+    def test_the_chosen_model_is_created(self, tmp_path):
+        with (
+            patch("ccgen.core.tasks.translate.create_translation_engine") as create,
+            patch("ccgen.core.tasks.translate.MeaningCheck", _FaithfulMeaning),
+        ):
+            TranslateTask(TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es", engine="nllb"))
+        assert create.call_args.args[0] == "nllb"

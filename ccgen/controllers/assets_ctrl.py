@@ -46,10 +46,10 @@ class AssetsController(QObject):
         """Catalog id of a Whisper model."""
         return f"whisper:{model_name}"
 
-    @Slot(str, str, result=list)
-    def translationAssetIds(self, source: str, target: str) -> list:
-        """Catalog ids of every package translating source→target needs (none for "auto" source)."""
-        return translation_asset_ids("" if source == "auto" else source, target)
+    @Slot(str, str, str, result=list)
+    def translationAssetIds(self, source: str, target: str, engine: str) -> list:
+        """Catalog ids of every model `engine` needs to translate source→target ("auto": not known yet)."""
+        return translation_asset_ids("" if source == "auto" else source, target, engine)
 
     @Slot(str, str, result=str)
     def voiceAssetId(self, mode: str, voice_key: str) -> str:

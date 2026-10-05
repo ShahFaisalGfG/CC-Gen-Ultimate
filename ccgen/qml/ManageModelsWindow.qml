@@ -27,7 +27,7 @@ AppWindow {
 
     readonly property var categories: [
         { key: "whisper", label: "Transcription", hint: "Whisper speech recognition models. Larger models are more accurate and slower." },
-        { key: "translation", label: "Translation", hint: "Offline language packages. Each one translates between English and that language; English bridges other pairs." },
+        { key: "translation", label: "Translation", hint: "Offline translation models, grouped by the model chosen under Preferences > Translation. OPUS-MT and Argos have one model per direction, with English bridging other pairs; NLLB and MADLAD cover every pair. The meaning check compares each translation with the original." },
         { key: "transliteration", label: "Transliteration", hint: "Optional neural models for more natural script conversion. The rule-based engine needs no download." },
         { key: "voices", label: "Voices", hint: "Dubbing voices. XTTS-v2 clones the original speakers; Kokoro and Piper are ready-made voices. Each downloads once." }
     ]
@@ -110,19 +110,31 @@ AppWindow {
         })
     }
 
-    // The voice cloning model asks for its licence once before its first download.
+    // Models licensed for non-commercial use only ask for their licence once before the
+    // first download: XTTS-v2 voice cloning and the NLLB-200 translation model.
+    readonly property var licensedModels: ({
+        "voices:xtts": { model: "xtts", section: "dubbing", key: "xtts_terms_accepted" },
+        "translation:nllb-1.3b": { model: "nllb", section: "translation", key: "nllb_terms_accepted" }
+    })
+
     function requestDownload(id) {
-        var accepted = prefsController.settings.dubbing && prefsController.settings.dubbing.xtts_terms_accepted
-        if (id === "voices:xtts" && !accepted) {
-            termsDialog.open()
-            return
+        var licensed = manageWin.licensedModels[id]
+        if (licensed) {
+            var section = prefsController.settings[licensed.section]
+            if (!(section && section[licensed.key])) {
+                termsDialog.pendingId = id
+                termsDialog.model = licensed.model
+                termsDialog.open()
+                return
+            }
         }
         modelsController.downloadAsset(id)
     }
 
-    XttsTermsDialog {
+    ModelTermsDialog {
         id: termsDialog
-        onAccepted: modelsController.downloadAsset("voices:xtts")
+        property string pendingId: ""
+        onAccepted: modelsController.downloadAsset(termsDialog.pendingId)
     }
 
     function cancelDownload(id) {

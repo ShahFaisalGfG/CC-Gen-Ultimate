@@ -76,7 +76,7 @@ Most auto-captioning tools are cloud services in disguise: upload your file, wai
 
 - 🔒 **100% offline** - no accounts, no cloud sync, no telemetry, models download once and never again
 - 🎙️ **Whisper-accurate transcription** - powered by `faster-whisper`, from a 75 MB `tiny` model up to `large-v3`, including the fast `large-v3-turbo`, on CPU or NVIDIA GPU
-- 🌍 **Built-in translation** - 10 target languages via fully offline neural machine translation
+- 🌍 **Built-in translation** - 10 target languages via fully offline neural machine translation (OPUS-MT by default, with NLLB-200, MADLAD-400, and Argos to choose from), plus a meaning check that keeps each line faithful to the original
 - ✍️ **Real Roman Urdu, not academic transliteration** - a dedicated converter tuned for colloquial spelling ("kya haal hai", not diacritic-laden Sanskrit-style romanization)
 - 🔀 **Two transliteration engines** - a fast rule-based converter and an optional neural engine for higher-quality output, your choice
 - 🗣️ **Dubbing with voice cloning** - speak translated subtitles in each original speaker's voice (XTTS-v2), or with natural Kokoro or light Piper voices, added to the video as a new audio track
@@ -92,7 +92,7 @@ Most auto-captioning tools are cloud services in disguise: upload your file, wai
 - **One tab per job** - Generate, Translate, Transliterate, and Dub each have their own queue, settings, and Start button, so one job never quietly depends on another
 - **Generate** - drag in video/audio files, get word-timestamped subtitles via `faster-whisper`; runs on an NVIDIA GPU automatically when CUDA is available, otherwise on the CPU
 - **Readable subtitle layout** - speech is split into cues of up to two balanced 42-character lines, breaking at sentence ends, commas, and pauses, with a comfortable minimum display time and no overlapping cues (line length and line count are configurable)
-- **Translate** - translate subtitle files into any of 10 supported languages, fully offline via `argostranslate`, models auto-downloaded once; whole sentences are translated and mapped back onto the subtitle timing, and pairs without a direct package are bridged through English. The source language comes from names like `movie_en.srt`, from the tab a file was sent from, or your choice
+- **Translate** - translate subtitle files into any of 10 supported languages, fully offline, models auto-downloaded once; whole sentences are translated and mapped back onto the subtitle timing, and pairs without a direct model are bridged through English. The source language comes from names like `movie_en.srt`, from the tab a file was sent from, or your choice. See [Translation Models](#translation-models)
 - **Transliterate** - convert subtitle files between 14 scripts, including a purpose-built Urdu ⇄ Roman Urdu converter, with a lightweight rule-based engine or a higher-quality neural engine
 - **Dub** - speak a subtitle file and add the speech to its video as a new, language-tagged audio track (`movie_dub_es.mkv`), keeping the original audio, subtitles, and chapters; or save it as a separate WAV file. See [Dubbing Voices](#dubbing-voices)
 - **Workflow** - build a chain of steps (for example Generate, then Translate to Spanish, then Dub), add, remove, and reorder steps, and choose which earlier step each one reads; every queued file runs through every step
@@ -129,7 +129,7 @@ Once published, installers will be available on the [Releases](https://github.co
 
 Each installer also comes as an **Intel GPU edition** (`..._intel_gpu_..._installer.exe`) that runs speech recognition and voice cloning on Intel Arc and Core Ultra graphics. The standard edition uses NVIDIA GPUs for those. Both editions run Piper and Kokoro voices on any DirectX 12 GPU (NVIDIA, AMD, or Intel), and everything falls back to the CPU when no GPU is available.
 
-Models (`faster-whisper`, `argostranslate`, transliteration models, and dubbing voices) download automatically on first use and are cached locally - no repeated downloads, no internet required afterward. **Models** in the title bar lists them all, with download and remove buttons.
+Models (`faster-whisper`, translation models, transliteration models, and dubbing voices) download automatically on first use and are cached locally - no repeated downloads, no internet required afterward. **Models** in the title bar lists them all, with download and remove buttons.
 
 ---
 
@@ -168,7 +168,7 @@ Every tab runs one task; the Workflow tab runs several in the order you set, pas
 
 ```
 Generate       video/audio ─► decode (PyAV) ─► transcribe (faster-whisper) ─► readable cues ─► video.srt
-Translate      subtitles ─► translate whole sentences (argostranslate) ─► video_<lang>.srt
+Translate      subtitles ─► translate whole sentences (OPUS-MT + meaning check) ─► video_<lang>.srt
 Transliterate  subtitles ─► convert script (rule or neural engine) ─► video_tr_<source>_<target>.srt
 Dub            subtitles + video ─► find speakers ─► speak each line at its time ─► video_dub_<lang>.mkv
 ```
@@ -193,6 +193,20 @@ Dub            subtitles + video ─► find speakers ─► speak each line at 
 | **Dubbing** | Arabic, Chinese, English, French, German, Hindi, Japanese, Korean, Portuguese, Russian, Spanish, Turkish, Urdu (see [Dubbing Voices](#dubbing-voices) for which voices speak each) |
 | **Transliteration scripts** | Roman/Latin, Urdu (Nastaliq), Hindi (Devanagari), Bengali, Gujarati, Punjabi (Gurmukhi), Tamil, Telugu, Kannada, Malayalam, Odia, Sinhala, Thai, Burmese |
 
+### Translation Models
+
+Choose the model under **Preferences > Translation** (or per session on the Translate tab). Every model is free and runs offline on CTranslate2 - 8-bit on the CPU, or on an NVIDIA GPU when one works.
+
+| Model | Quality | Speed (CPU) | Download | Licence |
+|---|---|---|---|---|
+| **OPUS-MT** *(default, recommended)* | Accurate; keeps names and technical terms such as GitHub | Fast (about half a second per sentence) | 300-900 MB per direction, stored at a quarter of that | Apache-2.0 / CC-BY-4.0 |
+| **NLLB-200 1.3B** | Equally faithful, strongest from Urdu into English; every pair directly | About 2x slower | 1.3 GB once | CC-BY-NC-4.0 (non-commercial use; asks once for your agreement) |
+| **MADLAD-400 3B** | Good; every pair directly | Slow without an NVIDIA GPU (several seconds per sentence) | 2.8 GB once | Apache-2.0 |
+| **Argos Translate (light)** | Rougher; can mistranslate terms | Fast | About 100 MB per direction | MIT / CC-BY |
+
+- **Through English** - OPUS-MT and Argos have one model per direction to or from English; other pairs (for example Urdu to French) are translated through English.
+- **Meaning check** - on by default. The last step produces several candidate translations, and a small multilingual model (120 MB) keeps the one whose meaning stays closest to the original sentence, preferring candidates that keep names and technical terms. Lines that may still drift are listed in a note on the file so you can review them. It catches invented or dropped content; a single mistranslated word inside an otherwise faithful sentence is up to the model itself.
+
 ### Transliteration Engines
 
 Urdu's Arabic-derived script doesn't romanize the way a purely academic transliteration scheme assumes - "کیا حال ہے پیارے؟" should read as **"kya haal hai piyare?"**, not a string of diacritics. CC-Gen-Ultimate ships two engines so you can pick the right trade-off:
@@ -210,14 +224,15 @@ The Dub tab (and Dub workflow steps) offers three kinds of voices:
 
 | Voices | Sounds like | Speed | Download | Languages |
 |---|---|---|---|---|
-| **Voice cloning (XTTS-v2)** *(default)* | Each original speaker | Slow without a GPU | 1.9 GB once | All except Urdu |
+| **Voice cloning (XTTS-v2)** *(default)* | Each original speaker | Slow without a GPU | 1.9 GB once | All (Urdu is read in Hindi script) |
 | **Natural voices (Kokoro)** | Natural stock voices | Fast on any computer | 350 MB once | English, Spanish, French, Hindi, Japanese, Portuguese, Chinese |
 | **Light voices (Piper)** | Clear but more synthetic stock voices | Fast | About 60 MB per voice | All, including Urdu |
 
 - **Speakers** - voice cloning listens to the original audio, tells the speakers apart, and gives each one their own cloned voice. Choose **One voice for everyone** to skip that.
 - **Timing** - each line starts exactly when its subtitle does. A line that doesn't fit before the next one is spoken faster, up to the **Fastest speech** limit (1.35x by default), and is then cut short with a note on the file. With voice cloning, speeding a line up reuses the work already done for it, so it costs a fraction of speaking the line again.
 - **Devices** - with **Run on: Automatic**, Kokoro and Piper voices time a short sample on each GPU and the CPU and use the fastest (small voices often run faster on the CPU than on integrated graphics). The choice is kept until the app closes, so later jobs start sooner. Voice cloning is always faster on a GPU, so it uses the first one that loads the model (NVIDIA or AMD, then Intel, Apple, and DirectML) without timing them. A GPU that fails on a line hands the rest of the job to the CPU.
-- **Fallback** - if the chosen voices can't speak a language (XTTS-v2 has no Urdu, for example), the next option that can is used and the file shows a note saying so.
+- **Urdu with voice cloning** - XTTS-v2 has no Urdu model, so with **Urdu in Hindi script** on (the default) it reads Urdu lines written in Devanagari through its Hindi voice. Spoken Urdu and Hindi share their sounds, so the dub sounds like Urdu in each original speaker's voice, though a few words may sound Hindi-accented; the file shows a note saying so. Turn the option off to dub Urdu with a Piper voice instead.
+- **Fallback** - if the chosen voices can't speak a language, the next option that can is used and the file shows a note saying so.
 - **Result** - the dub is added as a new audio track in a copy of the video (`movie_dub_es.mkv`), tagged with its language and kept beside the original track; turn on **Play the dub by default** to make players start with it. A subtitle file on its own becomes a WAV file.
 - **Licence** - XTTS-v2 is released under the [Coqui Public Model License](https://coqui.ai/cpml), which allows non-commercial use of the model and the audio it creates. The app asks you to accept it once before the first use. Kokoro and Piper voices don't have this limit. Only clone voices you have permission to use.
 
@@ -242,13 +257,13 @@ CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app pro
 |---|---|
 | **Appearance** | Theme: System / Light / Dark |
 | **Transcription** | Default model and spoken language, compute device (Automatic / CPU / NVIDIA GPU), skip silence and music (voice activity filter) |
-| **Translation** | Default source language (or detect from each file) and target language |
+| **Translation** | Translation model, default source language (or detect from each file), target language, and the meaning check |
 | **Transliteration** | Default source/target script and engine (rule/neural) |
-| **Dubbing** | Default voices, speakers, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
+| **Dubbing** | Default voices, speakers, whether voice cloning reads Urdu in Hindi script, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
 | **Subtitles** | Default formats, characters per line, lines per subtitle, default save folder |
 | **Advanced** | Logging on/off, log detail (warnings and errors / everything), open or clear the log files |
 
-All settings persist to `%APPDATA%\CC-Gen-Ultimate\settings.json` and apply to every tab and new workflow step automatically; changes you make on a tab stay in place for that session. Logs are written to `%APPDATA%\CC-Gen-Ultimate\logs`. Piper and Kokoro voices are stored in `%LOCALAPPDATA%\CC-Gen-Ultimate\voices`; the other models live in the Hugging Face and Argos caches in your user folder.
+All settings persist to `%APPDATA%\CC-Gen-Ultimate\settings.json` and apply to every tab and new workflow step automatically; changes you make on a tab stay in place for that session. Logs are written to `%APPDATA%\CC-Gen-Ultimate\logs`. Piper and Kokoro voices are stored in `%LOCALAPPDATA%\CC-Gen-Ultimate\voices` and translation models in `%LOCALAPPDATA%\CC-Gen-Ultimate\translation`; the other models live in the Hugging Face and Argos caches in your user folder.
 
 ---
 
@@ -277,7 +292,7 @@ python app.py
 
 # ...or run one task without the UI
 python main.py generate path\to\video.mp4 --model base --formats srt,vtt
-python main.py translate path\to\video_en.srt --target-lang ur
+python main.py translate path\to\video_en.srt --target-lang ur   # --engine nllb|madlad|argos, --no-meaning-check
 python main.py dub path\to\video.mp4 --subtitle path\to\video_ur.srt --mode piper
 python main.py workflow path\to\video.mp4 steps.json   # e.g. [{"kind": "generate"}, {"kind": "translate", "input": "step:0", "target_lang": "ur"}]
 python main.py --help   # every task and its options
@@ -310,7 +325,8 @@ The PyInstaller options live in `scripts/bundle.ps1`, shared by every build scri
 | Issue | Solution |
 |---|---|
 | First run is slow | The selected Whisper/translation/transliteration model is downloading - this only happens once per model |
-| Translation/transliteration fails with a language-pair error | Not every language pair has a pre-trained offline model; try translating to/from English as an intermediate step |
+| Translation/transliteration fails with a language-pair error | Not every language pair has a pre-trained offline model; try translating to/from English as an intermediate step, or pick NLLB-200 or MADLAD-400, which translate every pair directly |
+| "may not say the same as the original" | The meaning check found lines whose translation drifted; review those subtitles, or try another model under **Preferences > Translation** |
 | GUI window doesn't appear | Check the log output for "Embedded API server failed to start" - another process may be holding the local port |
 | Slow transcription on CPU | Use a smaller model (`base`/`small`), or `large-v3-turbo` on an NVIDIA GPU |
 | GPU isn't used | Install the CUDA 12 and cuDNN 9 runtime libraries; with **Run on: Automatic** the app falls back to the CPU when they're missing (the status line shows "Model ready (CPU)") |
@@ -363,7 +379,7 @@ Have a feature idea or a use case not covered above? [Start a discussion](https:
 
 The source code is released under the [MIT License](LICENSE) - free to use, modify, and distribute. The installers bundle GPL-3.0 dubbing components (Piper and eSpeak NG), so the distributed app is conveyed under GPL-3.0-or-later terms; see [Third-Party Notices](THIRD_PARTY_NOTICES.md) for every bundled library and downloaded model and its licence.
 
-Built with faster-whisper, argostranslate, indic-transliteration, the transformers/PyTorch ecosystem, Coqui XTTS-v2, Kokoro, and Piper.
+Built with faster-whisper, CTranslate2, OPUS-MT (University of Helsinki), NLLB-200, MADLAD-400, sentence-transformers' multilingual MiniLM, argostranslate, indic-transliteration, the transformers/PyTorch ecosystem, Coqui XTTS-v2, Kokoro, and Piper.
 
 Built with ❤️ by **Shah Faisal** · [Portfolio](https://shahfaisalgfg.github.io/shahfaisal/) · [shahfaisalgfg@outlook.com](mailto:shahfaisalgfg@outlook.com)
 

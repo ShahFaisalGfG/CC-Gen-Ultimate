@@ -1,6 +1,7 @@
 # main.py - CLI entry point for CC-Gen-Ultimate (runs one task without the UI)
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -15,6 +16,7 @@ from ccgen.config.defaults import (
     TranslationDefaults,
     TransliterationDefaults,
 )
+from ccgen.config.translation_models import ENGINE_KEYS as TRANSLATION_ENGINE_KEYS
 from ccgen.core.tasks import create_task
 from ccgen.core.tasks.configs import SUBTITLE_FORMATS
 from ccgen.utils.logging import configure_logging
@@ -22,6 +24,11 @@ from ccgen.utils.logging import configure_logging
 
 def main() -> None:
     """Parse CLI arguments and run the chosen task on one file."""
+    # Statuses and subtitles carry characters (→, Urdu, Devanagari) a legacy Windows console
+    # code page can't encode; print a placeholder for those instead of raising mid-run.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
     args = _parse_args()
     configure_logging(enabled=False)
     if not os.path.isfile(args.input):
@@ -81,6 +88,14 @@ def _parse_args() -> argparse.Namespace:
         "--target-lang", default=TranslationDefaults.DEFAULT_TARGET_LANG,
         help=f"Language to translate into (default: {TranslationDefaults.DEFAULT_TARGET_LANG}).",
     )
+    translate.add_argument(
+        "--engine", choices=TRANSLATION_ENGINE_KEYS, default=TranslationDefaults.DEFAULT_ENGINE,
+        help=f"Translation model (default: {TranslationDefaults.DEFAULT_ENGINE}).",
+    )
+    translate.add_argument(
+        "--no-meaning-check", action="store_true",
+        help="Skip comparing each translation with the original sentence.",
+    )
 
     transliterate = _command(
         commands, "transliterate", "Convert a subtitle file to another script.", _transliterate_body,
@@ -124,6 +139,10 @@ def _parse_args() -> argparse.Namespace:
     dub.add_argument("--wav", action="store_true", help="Write a separate WAV file instead of adding a track.")
     dub.add_argument("--default-track", action="store_true", help="Make the dub the default audio track.")
     dub.add_argument("--cpu", action="store_true", help="Never use the GPU.")
+    dub.add_argument(
+        "--no-script-bridge", action="store_true",
+        help="With xtts, dub Urdu with a Piper voice instead of reading it in Hindi script.",
+    )
     dub.add_argument("--reference", default=None, help="Recording of the voice to clone (for subtitle-only input).")
 
     workflow = _command(commands, "workflow", "Run a chain of steps described in a JSON file.", _workflow_body)
@@ -186,7 +205,10 @@ def _generate_body(args: argparse.Namespace) -> dict[str, Any]:
 
 def _translate_body(args: argparse.Namespace) -> dict[str, Any]:
     """Request body for the translate subcommand."""
-    return {**_common_body(args, "translate"), "source_lang": args.source_lang, "target_lang": args.target_lang}
+    return {
+        **_common_body(args, "translate"), "source_lang": args.source_lang, "target_lang": args.target_lang,
+        "engine": args.engine, "meaning_check": not args.no_meaning_check,
+    }
 
 
 def _transliterate_body(args: argparse.Namespace) -> dict[str, Any]:
@@ -207,6 +229,7 @@ def _dub_body(args: argparse.Namespace) -> dict[str, Any]:
         "output": DubbingDefaults.OUTPUT_WAV if args.wav else DubbingDefaults.OUTPUT_TRACK,
         "default_track": args.default_track,
         "device": DubbingDefaults.DEVICE_CPU if args.cpu else DubbingDefaults.DEVICE_AUTO,
+        "script_bridge": not args.no_script_bridge,
         "reference_audio": os.path.abspath(args.reference) if args.reference else None,
     }
 

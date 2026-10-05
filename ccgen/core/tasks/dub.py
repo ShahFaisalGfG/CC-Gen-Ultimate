@@ -41,6 +41,7 @@ class DubSettings:
     output: str
     default_track: bool
     device: str
+    script_bridge: bool = DubbingDefaults.SCRIPT_BRIDGE
 
 
 class Dubber:
@@ -49,7 +50,7 @@ class Dubber:
     def __init__(self, settings: DubSettings, language: str, can_clone: bool, ctx: RunContext) -> None:
         self.settings = settings
         self.language = language
-        self.voice, warning = resolve_voice(language, settings.mode, settings.voice, can_clone)
+        self.voice, warning = resolve_voice(language, settings.mode, settings.voice, can_clone, settings.script_bridge)
         if warning:
             ctx.warn(warning)
         self.engine = create_engine(self.voice, settings.device)
@@ -199,4 +200,5 @@ def dub_settings(cfg: Union[DubConfig, DubStep]) -> DubSettings:
     return DubSettings(
         mode=cfg.mode, voice=cfg.voice, speakers=cfg.speakers, max_speakers=cfg.max_speakers,
         max_speedup=cfg.max_speedup, output=cfg.output, default_track=cfg.default_track, device=cfg.device,
+        script_bridge=cfg.script_bridge,
     )

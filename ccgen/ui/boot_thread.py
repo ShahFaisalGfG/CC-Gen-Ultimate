@@ -1,4 +1,4 @@
-# boot_thread.py — loads the engine/backend stack off the GUI thread and reports staged
+# boot_thread.py - loads the engine/backend stack off the GUI thread and reports staged
 # progress to the startup splash screen.
 #
 # The imports inside run() below are a deliberate, narrow exception to the project's
@@ -42,6 +42,12 @@ class BootThread(QThread):
                 return
 
             self.stage_changed.emit("Preparing interface...", 90)
+            import ccgen.controllers.app_ctrl  # noqa: F401
+            import ccgen.controllers.assets_ctrl  # noqa: F401
+            import ccgen.controllers.prefs_ctrl  # noqa: F401
+            import ccgen.controllers.task_tabs  # noqa: F401
+            import ccgen.controllers.workflow_ctrl  # noqa: F401
+
             self.boot_ready.emit(api_server)
         except Exception as e:
             _log.critical("Startup failed: %r", e, exc_info=True)

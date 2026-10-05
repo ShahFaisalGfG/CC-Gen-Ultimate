@@ -37,7 +37,7 @@ ColumnLayout {
         return result
     }
 
-    XttsTermsDialog {
+    ModelTermsDialog {
         id: termsDialog
         parent: Overlay.overlay
     }
@@ -112,6 +112,20 @@ ColumnLayout {
                 value: root.options.language
                 onActivated: root.optionChanged("language", currentValue)
             }
+        }
+
+        FormRow {
+            label: "Urdu in Hindi script"
+            visible: root.cloning && (root.options.language === "ur" || root.options.language === "auto")
+            hint: "Voice cloning can't speak Urdu directly. On, it reads Urdu lines in Hindi script with "
+                + "the cloned voices; a few words may sound Hindi-accented. Off, Urdu uses a Piper voice."
+            AppSwitch {
+                checked: !!root.options.script_bridge
+                onToggled: root.optionChanged("script_bridge", checked)
+                accessibleName: "Read Urdu in Hindi script"
+                toolTipText: "Keep the cloned voices for Urdu by reading the lines in Hindi script."
+            }
+            Item { Layout.fillWidth: true }
         }
 
         FormRow {

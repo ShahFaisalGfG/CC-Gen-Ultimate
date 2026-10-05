@@ -20,16 +20,19 @@ from PySide6.QtCore import (
 )
 
 from ccgen.config.defaults import DubbingDefaults, LanguageOptions, TransliterationDefaults
+from ccgen.config.translation_models import ENGINE_NLLB
 from ccgen.config.voices import ENGINE_LABELS, ENGINE_XTTS
 from ccgen.controllers.task_ctrl import TaskController, subtitle_output_body, subtitle_output_from_settings
 from ccgen.controllers.task_tabs import (
     MEDIA_EXTS,
+    NLLB_TERMS_BLOCKER,
     VOICE_RESETS,
     XTTS_TERMS_BLOCKER,
     DubController,
     GenerateController,
     TranslateController,
     TransliterateController,
+    nllb_terms_accepted,
     xtts_terms_accepted,
 )
 from ccgen.core.tasks.configs import INPUT_SOURCE
@@ -261,6 +264,9 @@ class WorkflowController(TaskController):
         uses_cloning = any(s["kind"] == "dub" and s["mode"] == ENGINE_XTTS for s in self._steps_model.steps)
         if uses_cloning and not xtts_terms_accepted(self._saved_settings):
             return XTTS_TERMS_BLOCKER
+        uses_nllb = any(s["kind"] == "translate" and s.get("engine") == ENGINE_NLLB for s in self._steps_model.steps)
+        if uses_nllb and not nllb_terms_accepted(self._saved_settings):
+            return NLLB_TERMS_BLOCKER
         return ""
 
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:

@@ -6,6 +6,7 @@
 
 import logging
 import os
+from typing import Optional
 
 from ccgen.config.capabilities import language_from_filename
 from ccgen.core import Segment, TranslatedSegment
@@ -16,6 +17,7 @@ from ccgen.core.tasks.configs import TranslateConfig
 from ccgen.core.tasks.outputs import write_track
 from ccgen.engines.translation import create_engine as create_translation_engine
 from ccgen.engines.translation.base import TranslationEngine
+from ccgen.engines.translation.fidelity import DOUBT_THRESHOLD, MeaningCheck
 from ccgen.utils.callbacks import JobCancelled
 
 _log = logging.getLogger(__name__)
@@ -48,8 +50,13 @@ def translate_track(
     source: str,
     target: str,
     ctx: RunContext,
+    meaning: Optional[MeaningCheck] = None,
 ) -> Track:
-    """Translate whole sentences of `track`, then spread each translation back over its cues."""
+    """Translate whole sentences of `track`, then spread each translation back over its cues.
+
+    With `meaning`, sentences whose translation drifts from the original are reported by their
+    subtitle numbers so they can be reviewed.
+    """
     if source == target:
         raise ValueError(f"The subtitles are already in '{target}'. Choose a different target language.")
     cues = track.cues
@@ -80,6 +87,8 @@ def translate_track(
         engine.set_pair(source, target)
         engine.ensure_model(ctx.status, ctx.progress)
         translated_units = engine.translate_segments(unit_segments, ctx.status, ctx.progress, on_unit)
+        if meaning is not None:
+            _report_doubtful(translated_units, units, meaning, target, ctx)
     except JobCancelled:
         raise
     except Exception as e:
@@ -95,13 +104,40 @@ def translate_track(
     )
 
 
+def _report_doubtful(
+    translated: list[TranslatedSegment], units: list[list[int]], meaning: MeaningCheck, target: str, ctx: RunContext,
+) -> None:
+    """Warn about sentences whose translation may not say the same as the original."""
+    filled = [unit for unit in translated if unit["original"] and unit["translated"]]
+    if not filled:
+        return
+    ctx.status("Checking the translation against the original...")
+    meaning.ensure(ctx.status, ctx.progress)
+    scores = meaning.scores([u["original"] for u in filled], [u["translated"] for u in filled], target)
+    numbers = [units[u["id"]][0] + 1 for u, score in zip(filled, scores) if score < DOUBT_THRESHOLD]
+    if numbers:
+        listed = ", ".join(str(n) for n in numbers[:10]) + (" ..." if len(numbers) > 10 else "")
+        ctx.warn(
+            f"{len(numbers)} line(s) may not say the same as the original (subtitle {listed}). "
+            "Review them, or try another translation model in Preferences."
+        )
+
+
+def create_translator(engine: str, source: str, target: str, meaning_check: bool) -> tuple[TranslationEngine, Optional[MeaningCheck]]:
+    """The engine a translate task or step uses, and its meaning check when that is on."""
+    meaning = MeaningCheck() if meaning_check else None
+    return create_translation_engine(engine, source_lang=source, target_lang=target, meaning=meaning), meaning
+
+
 class TranslateTask(Task[TranslateConfig]):
     """Translate one subtitle file and write the translated subtitles."""
 
     def __init__(self, config: TranslateConfig) -> None:
         super().__init__(config)
         self._layout = CueLayout(max_line_length=config.max_line_length, max_lines=config.max_lines)
-        self._engine = create_translation_engine(source_lang=config.source_lang, target_lang=config.target_lang)
+        self._engine, self._meaning = create_translator(
+            config.engine, config.source_lang, config.target_lang, config.meaning_check,
+        )
 
     @property
     def stages(self) -> list[str]:
@@ -116,7 +152,7 @@ class TranslateTask(Task[TranslateConfig]):
             ctx.segment(cue)
         source = resolve_source(cfg.source_lang, track, cfg.input_path)
         ctx.status("Translating...")
-        translated = translate_track(track, self._engine, source, cfg.target_lang, ctx)
+        translated = translate_track(track, self._engine, source, cfg.target_lang, ctx, self._meaning)
         ctx.status("Writing subtitle files...")
         files = write_track(
             translated, cfg.input_path, f"_{cfg.target_lang}", cfg.formats, self._layout, cfg.output_dir,

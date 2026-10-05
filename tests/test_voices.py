@@ -20,9 +20,13 @@ class TestCatalog:
 
     def test_engine_support(self):
         assert engine_supports("xtts", "zh")
-        assert not engine_supports("xtts", "ur")
         assert engine_supports("piper", "ur")
         assert not engine_supports("kokoro", "ar")
+
+    def test_xtts_speaks_urdu_only_through_the_script_bridge(self):
+        assert engine_supports("xtts", "ur")
+        assert not engine_supports("xtts", "ur", bridge=False)
+        assert voices_for("xtts", "ur", bridge=False) == []
 
 
 class TestResolveVoice:
@@ -33,10 +37,19 @@ class TestResolveVoice:
     def test_chinese_uses_xtts_tokenizer_code(self):
         assert resolve_voice("zh", "xtts")[0].model_path == "zh-cn"
 
-    def test_falls_back_with_a_warning(self):
+    def test_urdu_cloning_reads_hindi_script_and_says_so(self):
         voice, warning = resolve_voice("ur", "xtts")
+        assert (voice.engine, voice.language, voice.model_path, voice.bridge) == ("xtts", "ur", "hi", "hi")
+        assert warning is not None and "read the lines in Hindi script" in warning
+
+    def test_falls_back_with_a_warning_when_the_bridge_is_off(self):
+        voice, warning = resolve_voice("ur", "xtts", bridge=False)
         assert voice.engine == "piper"
         assert warning == "XTTS-v2 can't speak 'ur', so Piper was used instead."
+
+    def test_native_xtts_languages_have_no_bridge(self):
+        voice, warning = resolve_voice("hi", "xtts")
+        assert (voice.bridge, warning) == ("", None)
 
     def test_xtts_without_reference_audio_falls_back(self):
         voice, warning = resolve_voice("en", "xtts", can_clone=False)

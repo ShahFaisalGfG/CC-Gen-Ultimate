@@ -56,16 +56,28 @@ class TrackReport:
     spoken: int = 0
     sped_up: int = 0
     trimmed: list[int] = field(default_factory=list)
+    # Lines where the voice kept talking past the text and the extra speech was cut.
+    ran_on: list[int] = field(default_factory=list)
 
     def warnings(self) -> list[str]:
-        """User-facing notes about lines that could not be spoken in full."""
-        if not self.trimmed:
-            return []
-        numbers = ", ".join(str(n) for n in self.trimmed[:10]) + (" ..." if len(self.trimmed) > 10 else "")
-        return [
-            f"{len(self.trimmed)} line(s) were too long for their time and were cut short "
-            f"(subtitle {numbers}). Shorten them or raise the maximum speed-up."
-        ]
+        """User-facing notes about lines that could not be spoken in full or as written."""
+        notes = []
+        if self.ran_on:
+            notes.append(
+                f"{len(self.ran_on)} line(s) kept talking past their text, so the extra speech was cut "
+                f"(subtitle {_numbers(self.ran_on)}). Listen to them, and dub again if one sounds wrong."
+            )
+        if self.trimmed:
+            notes.append(
+                f"{len(self.trimmed)} line(s) were too long for their time and were cut short "
+                f"(subtitle {_numbers(self.trimmed)}). Shorten them or raise the maximum speed-up."
+            )
+        return notes
+
+
+def _numbers(lines: list[int]) -> str:
+    """The first ten subtitle numbers, for a note."""
+    return ", ".join(str(n) for n in lines[:10]) + (" ..." if len(lines) > 10 else "")
 
 
 def synthesize_track(
@@ -256,6 +268,8 @@ def _speak_to_fit(
 ) -> np.ndarray:
     """Synthesize `text` at TRACK_RATE so it fits `slot` samples, speeding up or trimming."""
     clip = _resample(*engine.synthesize(text, 1.0, speaker))
+    if engine.last_line_capped:
+        report.ran_on.append(number)
     if clip.size > slot and max_speedup > 1.0:
         speed = min(clip.size / slot, max_speedup)
         clip = _resample(*engine.retime(text, speed, speaker))

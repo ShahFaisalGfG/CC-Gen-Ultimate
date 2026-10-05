@@ -300,6 +300,15 @@ class TestDubTab:
         assert body["subtitle_path"] == str(tmp_path / "movie_es.srt")
         assert body["language"] == "es"
 
+    def test_urdu_script_bridge_follows_preferences_into_the_job(self, tmp_path):
+        ctrl = _dub()
+        assert ctrl.options["script_bridge"] is True
+        ctrl._apply_defaults({"dubbing": {"script_bridge": False}})
+        (tmp_path / "talk_ur.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "talk_ur.srt")])
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["script_bridge"] is False
+
     def test_lone_subtitle_becomes_a_wav(self, tmp_path):
         ctrl = _dub()
         (tmp_path / "talk_es.srt").write_text("")

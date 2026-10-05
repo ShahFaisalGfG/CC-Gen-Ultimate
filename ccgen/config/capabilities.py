@@ -8,6 +8,7 @@ import re
 from typing import Optional
 
 from ccgen.config.defaults import LanguageOptions, ModelRepos, TransliterationDefaults
+from ccgen.config.translation_models import ENGINE_ARGOS, models_for
 
 _SCHEME_CODES = frozenset(code for _, code in TransliterationDefaults.SCHEMES)
 # Punjabi has no direct neural model; the neural engine pivots it through Devanagari to reach
@@ -41,13 +42,28 @@ def neural_model_key(source: str, target: str) -> Optional[str]:
     return None
 
 
-def translation_asset_ids(source: str, target: str) -> list[str]:
-    """Manage Models ids of the Argos packages translating source→target (via English if needed)."""
-    if source == target or not source or not target:
+def translation_asset_ids(source: str, target: str, engine: str = ENGINE_ARGOS) -> list[str]:
+    """Manage Models ids of what `engine` needs to translate source→target ("" source: not known yet).
+
+    Argos needs a package per direction (via English when needed). NLLB and MADLAD need their
+    one model whatever the pair; OPUS-MT needs the models on its route, and with the source not
+    known yet, the model from English into the target.
+    """
+    if source == target or not target:
         return []
-    if PIVOT_LANGUAGE in (source, target):
-        return [f"translation:{source}-{target}"]
-    return [f"translation:{source}-{PIVOT_LANGUAGE}", f"translation:{PIVOT_LANGUAGE}-{target}"]
+    if engine == ENGINE_ARGOS:
+        if not source:
+            return []
+        if PIVOT_LANGUAGE in (source, target):
+            return [f"translation:{source}-{target}"]
+        return [f"translation:{source}-{PIVOT_LANGUAGE}", f"translation:{PIVOT_LANGUAGE}-{target}"]
+    source = source or PIVOT_LANGUAGE
+    if source == target:
+        return []
+    try:
+        return [f"translation:{model.key}" for model in models_for(engine, source, target)]
+    except ValueError:
+        return []
 
 
 def language_from_filename(path: str) -> str:

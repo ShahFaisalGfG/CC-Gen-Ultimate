@@ -17,6 +17,7 @@ from ccgen.config.defaults import (
     TranslationDefaults,
     TransliterationDefaults,
 )
+from ccgen.config.translation_models import ENGINE_NLLB, NLLB_TERMS_SETTING
 from ccgen.config.voices import ENGINE_XTTS, voices_for
 from ccgen.controllers.task_ctrl import (
     TaskController,
@@ -98,6 +99,8 @@ class TranslateController(TaskController):
         return {
             "source_lang": translation.get("source_lang") or TranslationDefaults.DEFAULT_SOURCE_LANG,
             "target_lang": translation.get("target_lang", TranslationDefaults.DEFAULT_TARGET_LANG),
+            "engine": translation.get("engine", TranslationDefaults.DEFAULT_ENGINE),
+            "meaning_check": bool(translation.get("meaning_check", TranslationDefaults.MEANING_CHECK)),
         }
 
     def initial_options(self) -> dict[str, Any]:
@@ -105,6 +108,11 @@ class TranslateController(TaskController):
 
     def options_from_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         return {**self.step_options(settings), **subtitle_output_from_settings(settings)}
+
+    def extra_blocker(self) -> str:
+        if self._options["engine"] == ENGINE_NLLB and not nllb_terms_accepted(self._saved_settings):
+            return NLLB_TERMS_BLOCKER
+        return ""
 
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:
         unknown = next((i for i in items if not i.get("language")), None)
@@ -128,6 +136,8 @@ class TranslateController(TaskController):
             **subtitle_output_body(opts, item["path"]),
             "source_lang": source,
             "target_lang": opts["target_lang"],
+            "engine": opts["engine"],
+            "meaning_check": bool(opts["meaning_check"]),
         }
 
 
@@ -196,6 +206,7 @@ class DubController(TaskController):
             "output": dubbing.get("output", DubbingDefaults.DEFAULT_OUTPUT),
             "default_track": bool(dubbing.get("default_track", DubbingDefaults.DEFAULT_TRACK)),
             "device": dubbing.get("device", DubbingDefaults.DEVICE_AUTO),
+            "script_bridge": bool(dubbing.get("script_bridge", DubbingDefaults.SCRIPT_BRIDGE)),
         }
 
     def initial_options(self) -> dict[str, Any]:
@@ -298,6 +309,7 @@ class DubController(TaskController):
             "output": DubbingDefaults.OUTPUT_WAV if subtitle_only else opts["output"],
             "default_track": bool(opts["default_track"]),
             "device": opts["device"],
+            "script_bridge": bool(opts["script_bridge"]),
         }
 
 
@@ -307,6 +319,14 @@ XTTS_TERMS_BLOCKER = "Accept the XTTS-v2 licence to use voice cloning (see the n
 def xtts_terms_accepted(settings: dict[str, Any]) -> bool:
     """True once the user agreed to the XTTS-v2 licence."""
     return bool(settings.get("dubbing", {}).get("xtts_terms_accepted"))
+
+
+NLLB_TERMS_BLOCKER = "Accept the NLLB-200 licence to translate with it (see the notice under Translation)."
+
+
+def nllb_terms_accepted(settings: dict[str, Any]) -> bool:
+    """True once the user agreed to the NLLB-200 licence (non-commercial use)."""
+    return bool(settings.get("translation", {}).get(NLLB_TERMS_SETTING))
 
 
 def subtitles_by_stem(folder: str) -> dict[str, list[str]]:

@@ -23,11 +23,10 @@ from ccgen.core.tasks.configs import (
 from ccgen.core.tasks.dub import DUB_STAGES, Dubber, dub_settings
 from ccgen.core.tasks.generate import transcribe
 from ccgen.core.tasks.outputs import write_track
-from ccgen.core.tasks.translate import load_subtitle_track, translate_track
+from ccgen.core.tasks.translate import create_translator, load_subtitle_track, translate_track
 from ccgen.core.tasks.transliterate import transliterate_track, transliteration_suffix
 from ccgen.engines.captions import create_engine as create_caption_engine
 from ccgen.engines.captions.base import CaptionEngine
-from ccgen.engines.translation import create_engine as create_translation_engine
 from ccgen.engines.transliteration import create_engine as create_transliteration_engine
 
 _log = logging.getLogger(__name__)
@@ -131,8 +130,8 @@ class WorkflowTask(Task[WorkflowConfig]):
         source = text.language if step.source_lang == "auto" else step.source_lang
         if not source:
             raise ValueError("The language of this step's input is unknown. Choose its source language.")
-        engine = create_translation_engine(source_lang=source, target_lang=step.target_lang)
-        return translate_track(text, engine, source, step.target_lang, ctx)
+        engine, meaning = create_translator(step.engine, source, step.target_lang, step.meaning_check)
+        return translate_track(text, engine, source, step.target_lang, ctx, meaning)
 
     def _dub(self, step: DubStep, text: Track, ctx: RunContext) -> tuple[str, str]:
         """Speak an earlier step's text and add it to the workflow's media; return (path, language)."""

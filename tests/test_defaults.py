@@ -29,7 +29,11 @@ class TestGetDefaultSettings:
         assert set(transliteration.keys()) == {"source", "target", "engine"}
 
     def test_translation_section_has_no_stage_switch(self):
-        assert set(get_default_settings()["translation"].keys()) == {"source_lang", "target_lang"}
+        translation = get_default_settings()["translation"]
+        assert set(translation.keys()) == {
+            "source_lang", "target_lang", "engine", "meaning_check", "nllb_terms_accepted",
+        }
+        assert (translation["engine"], translation["meaning_check"]) == ("opus_mt", True)
 
     def test_output_section_keys_used_by_settings_service(self):
         settings = get_default_settings()

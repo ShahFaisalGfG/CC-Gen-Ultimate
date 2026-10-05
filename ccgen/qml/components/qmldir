@@ -17,4 +17,4 @@ SegmentItem 1.0 SegmentItem.qml
 StyledComboBox 1.0 StyledComboBox.qml
 TitleBar 1.0 TitleBar.qml
 Toast 1.0 Toast.qml
-XttsTermsDialog 1.0 XttsTermsDialog.qml
+ModelTermsDialog 1.0 ModelTermsDialog.qml

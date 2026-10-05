@@ -17,7 +17,7 @@ below.
 | Component | Licence | Used for |
 |---|---|---|
 | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | MIT | Speech recognition |
-| [CTranslate2](https://github.com/OpenNMT/CTranslate2) | MIT | Whisper inference |
+| [CTranslate2](https://github.com/OpenNMT/CTranslate2) | MIT | Whisper and translation inference |
 | [Argos Translate](https://github.com/argosopentech/argos-translate) | MIT | Translation |
 | [Transformers](https://github.com/huggingface/transformers) | Apache-2.0 | Neural transliteration |
 | [Hugging Face Hub](https://github.com/huggingface/huggingface_hub) | Apache-2.0 | Model downloads |
@@ -48,6 +48,10 @@ Models are not bundled. Each downloads from its original host when first needed 
 | Model | Licence |
 |---|---|
 | Whisper (Systran faster-whisper conversions) | MIT |
+| [OPUS-MT](https://huggingface.co/Helsinki-NLP) translation models (Language Technology Research Group, University of Helsinki) | Apache-2.0 or CC-BY-4.0, per model; converted to CTranslate2 on your computer after download |
+| [NLLB-200 distilled 1.3B](https://huggingface.co/OpenNMT/nllb-200-distilled-1.3B-ct2-int8) (Meta) | [CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/): non-commercial use only. The app asks you to accept it before the first download. |
+| [MADLAD-400 3B](https://huggingface.co/santhosh/madlad400-3b-ct2) (Google) | Apache-2.0 |
+| [paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) (meaning check) | Apache-2.0 |
 | Argos Translate language packages | Listed in each package's metadata |
 | M2M100 Urdu ↔ Roman Urdu fine-tunes (Mavkif) | Apache-2.0 |
 | Rekhta Hindi → Urdu transliteration | Unclear: its repository ships an empty licence file |

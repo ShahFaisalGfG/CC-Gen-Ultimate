@@ -6,7 +6,7 @@
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import torch
@@ -14,19 +14,34 @@ import torch.nn.functional as F
 from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import Xtts
 
-from ccgen.config.voices import XTTS_LANGUAGES
 from ccgen.engines.devices import Accelerator, first_working, torch_accelerators
 from ccgen.engines.model_cache import ModelCache
 from ccgen.engines.speech.base import REFERENCE_RATE, CloningEngine, ProgressCb, StatusCb, split_for_speech
+from ccgen.engines.speech.numbers import spell_numbers, spells_numbers
 from ccgen.engines.speech.voice_files import ensure_xtts
+from ccgen.engines.transliteration.urdu_devanagari import urdu_to_devanagari
 from ccgen.utils.callbacks import emit_status
 
 _log = logging.getLogger(__name__)
+
+# How a bridged voice (see voices.XTTS_SCRIPT_BRIDGE) rewrites its lines: (language, bridge).
+_BRIDGE_WRITERS: dict[tuple[str, str], Callable[[str], str]] = {("ur", "hi"): urdu_to_devanagari}
 
 _models: ModelCache[tuple[Xtts, str]] = ModelCache("XTTS-v2")
 _WARMUP_TEXT = "Hello."
 _DEFAULT_CHAR_LIMIT = 200
 _PIECE_GAP_S = 0.12
+
+# Runaway guard. XTTS-v2 picks speech tokens by sampling and sometimes keeps talking past the
+# text (babble), most often on very short lines. Normal speech runs about 0.09 s per character
+# of text, so a take far longer than that is spoken again with cooler sampling; if every take
+# runs on, the shortest is decoded only up to a plausible length, which keeps its real words.
+_SECONDS_PER_CHAR = 0.09
+_MIN_EXPECTED_S = 0.8
+_RUNAWAY_FACTOR = 1.8
+_RUNAWAY_MARGIN_S = 0.5
+_RETRY_TEMPERATURES = (0.5, 0.3)
+_CAP_FACTOR = 1.3
 
 
 class XttsEngine(CloningEngine):
@@ -46,7 +61,11 @@ class XttsEngine(CloningEngine):
             return model, accelerator.label
 
         self._model, self.device_label = _models.get_or_load(self._device_preference, loader)
-        self._language = XTTS_LANGUAGES[self.voice.language]
+        # The tokenizer language: the voice's own, or the bridge language whose script it reads.
+        self._language = self.voice.model_path
+        self._write = _BRIDGE_WRITERS[(self.voice.language, self.voice.bridge)] if self.voice.bridge else None
+        # Bridged Urdu keeps its own number words (sifr, not shunya for zero).
+        self._numbers = self.voice.language if self.voice.bridge else self._language
         self._speakers: dict[int, tuple[Any, Any]] = {}
         # The last line's GPT output per piece, so retime() only reruns the fast audio decoder.
         self._last_line: Optional[tuple[str, int, list[Any]]] = None
@@ -86,16 +105,40 @@ class XttsEngine(CloningEngine):
         if speaker not in self._speakers:
             raise RuntimeError(f"No reference voice was registered for speaker {speaker}.")
         gpt_latent, embedding = self._speakers[speaker]
+        spoken = self._write(text) if self._write else text
+        if spells_numbers(self._numbers):
+            spoken = spell_numbers(spoken, self._numbers)
         # XTTS cuts audio short past a per-language length, and its own splitter loads spaCy
         # pipelines (Japanese needs SudachiPy), so long lines are split here instead.
         limit = self._model.tokenizer.char_limits.get(self._language.split("-")[0], _DEFAULT_CHAR_LIMIT)
-        outputs = [
-            self._model.inference(piece, self._language, gpt_latent, embedding, speed=speed)
-            for piece in split_for_speech(text, limit)
-        ]
+        self.last_line_capped = False
+        takes = [self._speak_piece(piece, gpt_latent, embedding, speed) for piece in split_for_speech(spoken, limit)]
         if speed == 1.0:
-            self._last_line = (text, speaker, [torch.from_numpy(out["gpt_latents"]) for out in outputs])
-        return self._join([np.asarray(out["wav"], dtype=np.float32) for out in outputs]), self.output_rate
+            self._last_line = (text, speaker, [latents for _, latents in takes])
+        return self._join([wav for wav, _ in takes]), self.output_rate
+
+    def _speak_piece(self, piece: str, gpt_latent: Any, embedding: Any, speed: float) -> tuple[np.ndarray, Any]:
+        """Speak one piece, guarding against runaway takes; return its audio and GPT latents."""
+        expected_s = max(_MIN_EXPECTED_S, len(piece) * _SECONDS_PER_CHAR) / speed
+        longest = int((expected_s * _RUNAWAY_FACTOR + _RUNAWAY_MARGIN_S) * self.output_rate)
+        shortest: Optional[tuple[np.ndarray, Any]] = None
+        for temperature in (None, *_RETRY_TEMPERATURES):
+            options: dict[str, Any] = {} if temperature is None else {"temperature": temperature}
+            out = self._model.inference(piece, self._language, gpt_latent, embedding, speed=speed, **options)
+            take = (np.asarray(out["wav"], dtype=np.float32), torch.from_numpy(out["gpt_latents"]))
+            if take[0].size <= longest:
+                return take
+            if shortest is None or take[0].size < shortest[0].size:
+                shortest = take
+        assert shortest is not None
+        wav, latents = shortest
+        # The latents are what was decoded, so audio length maps to latent frames one to one.
+        frames = max(1, int(latents.shape[1] * expected_s * _CAP_FACTOR * self.output_rate / wav.size))
+        latents = latents[:, :frames]
+        wav = self._model.hifigan_decoder(latents.to(self._model.device), g=embedding).cpu().squeeze().numpy()
+        _log.info("XTTS-v2 kept talking past %d characters of text; cut the take to %.1f s", len(piece), wav.size / self.output_rate)
+        self.last_line_capped = True
+        return wav.astype(np.float32), latents
 
     @torch.inference_mode()
     def retime(self, text: str, speed: float, speaker: int = 0) -> tuple[np.ndarray, int]:

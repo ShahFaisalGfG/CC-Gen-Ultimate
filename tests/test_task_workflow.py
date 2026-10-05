@@ -8,7 +8,7 @@ import pytest
 from ccgen.core.tasks import TASK_CONFIG
 from ccgen.core.tasks.workflow import WorkflowTask
 from tests.test_task_dub import FakeEngine, _write_media
-from tests.test_task_translate import _fake_translate
+from tests.test_task_translate import _FaithfulMeaning, _fake_translate
 
 _SEGMENTS = [{
     "id": 0, "start": 0.0, "end": 2.0, "text": " Hello world.", "language": "en",
@@ -77,7 +77,8 @@ class TestRun:
         """Patch every engine factory the workflow uses."""
         with (
             patch("ccgen.core.tasks.workflow.create_caption_engine") as captions,
-            patch("ccgen.core.tasks.workflow.create_translation_engine") as translation,
+            patch("ccgen.core.tasks.translate.create_translation_engine") as translation,
+            patch("ccgen.core.tasks.translate.MeaningCheck", _FaithfulMeaning),
             patch("ccgen.core.tasks.workflow.load_audio", return_value=np.zeros(16000, dtype=np.float32)),
             patch("ccgen.core.tasks.dub.create_engine") as speech,
         ):
@@ -96,7 +97,9 @@ class TestRun:
         task.prepare()
         result = task.run()
         assert result.success, result.error
-        engines["translation"].assert_called_once_with(source_lang="en", target_lang="es")
+        call = engines["translation"].call_args
+        assert call.args == ("opus_mt",)
+        assert (call.kwargs["source_lang"], call.kwargs["target_lang"]) == ("en", "es")
         assert result.output_files == [str(tmp_path / "movie.srt"), str(tmp_path / "movie_es.srt")]
         assert result.detected_language == "en"
         assert result.output_languages == {str(tmp_path / "movie.srt"): "en", str(tmp_path / "movie_es.srt"): "es"}

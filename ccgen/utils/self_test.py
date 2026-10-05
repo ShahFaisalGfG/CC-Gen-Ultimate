@@ -39,10 +39,15 @@ def _check_lazy_modules() -> None:
     from argostranslate.apply_bpe import BPE  # noqa: F401
     from argostranslate.sbd import MiniSBDSentencizer, StanzaSentencizer  # noqa: F401
     from sacremoses.tokenize import MosesDetokenizer, MosesTokenizer  # noqa: F401
+    from ctranslate2.converters import TransformersConverter  # noqa: F401 - prepares OPUS-MT models
+    from tokenizers import Tokenizer  # noqa: F401 - the meaning check's tokenizer
+    from transformers import MarianMTModel  # noqa: F401 - loaded by name when converting OPUS-MT
     from transformers.models.auto.tokenization_auto import tokenizer_class_from_name
 
-    if tokenizer_class_from_name("M2M100Tokenizer") is None:
-        raise RuntimeError("transformers could not resolve M2M100Tokenizer")
+    # Transliteration (M2M100), OPUS-MT (Marian), and NLLB tokenizers are resolved by name.
+    for name in ("M2M100Tokenizer", "MarianTokenizer", "NllbTokenizerFast"):
+        if tokenizer_class_from_name(name) is None:
+            raise RuntimeError(f"transformers could not resolve {name}")
 
 
 def _check_native_libraries() -> None:

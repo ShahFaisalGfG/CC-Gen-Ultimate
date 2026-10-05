@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from multiprocessing import freeze_support
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import QSize, QThreadPool
 from PySide6.QtGui import QIcon
@@ -13,24 +13,15 @@ from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from ccgen.api.routers.jobs import cancel_all_jobs
-from ccgen.controllers.app_ctrl import AppController
-from ccgen.controllers.assets_ctrl import AssetsController
-from ccgen.controllers.prefs_ctrl import PrefsController
-from ccgen.controllers.task_ctrl import TaskController
-from ccgen.controllers.task_tabs import (
-    DubController,
-    GenerateController,
-    TranslateController,
-    TransliterateController,
-)
-from ccgen.controllers.workflow_ctrl import WorkflowController
 from ccgen.ui.boot_thread import BootThread
 from ccgen.ui.splash_screen import SplashScreen
 from ccgen.utils.helpers import resource_path
 from ccgen.utils.logging import configure_from_settings
-from ccgen.utils.self_test import run_self_test
 from ccgen.utils.settings import load_settings
+
+# The controllers, API, and self-test pull in torch, CTranslate2, and transformers, which take
+# many seconds to import. They are imported where they are used: the boot thread loads them
+# behind the splash, so by the time _on_ready runs they are already in memory.
 
 _log = logging.getLogger(__name__)
 _SHUTDOWN_WAIT_MS = 2000
@@ -46,13 +37,14 @@ class _Startup:
         self._engine: Optional[QQmlApplicationEngine] = None
         self._api_server = None
         self._app_ctrl = None
-        # One controller per task tab, keyed by the QML context property name.
-        self._task_ctrls: dict[str, TaskController] = {}
+        # One TaskController per task tab, keyed by the QML context property name.
+        self._task_ctrls: dict[str, Any] = {}
         self._prefs_ctrl = None
         self._assets_ctrl = None
 
         self._splash = SplashScreen(resource_path("ccgen/assets/icons/Square310x310Logo.scale-100.png"))
         self._splash.show()
+        _log.info("Splash shown")
 
         self._boot = BootThread()
         self._boot.stage_changed.connect(self._splash.set_stage)
@@ -62,6 +54,18 @@ class _Startup:
 
     def _on_ready(self, api_server) -> None:
         """Build controllers and load the QML UI once the backend is ready."""
+        from ccgen.controllers.app_ctrl import AppController
+        from ccgen.controllers.assets_ctrl import AssetsController
+        from ccgen.controllers.prefs_ctrl import PrefsController
+        from ccgen.controllers.task_ctrl import TaskController
+        from ccgen.controllers.task_tabs import (
+            DubController,
+            GenerateController,
+            TranslateController,
+            TransliterateController,
+        )
+        from ccgen.controllers.workflow_ctrl import WorkflowController
+
         try:
             _log.info("Embedded API server ready at %s", api_server.base_url)
             self._api_server = api_server
@@ -143,7 +147,10 @@ class _Startup:
                 controller.shutdown()
             # The controllers' cancel requests need the event loop, which has stopped by now,
             # so running jobs are cancelled in-process and stop at their next safe point.
-            cancel_all_jobs()
+            if self._api_server is not None:
+                from ccgen.api.routers.jobs import cancel_all_jobs
+
+                cancel_all_jobs()
             if self._task_ctrls:
                 # A cancelled folder scan exits within milliseconds; wait for it so its
                 # thread doesn't outlive the objects it reports to.
@@ -169,6 +176,8 @@ def main() -> None:
     """
     freeze_support()
     if _SELF_TEST_FLAG in sys.argv:
+        from ccgen.utils.self_test import run_self_test
+
         index = sys.argv.index(_SELF_TEST_FLAG)
         sys.exit(run_self_test(sys.argv[index + 1] if index + 1 < len(sys.argv) else None))
     configure_from_settings(load_settings())

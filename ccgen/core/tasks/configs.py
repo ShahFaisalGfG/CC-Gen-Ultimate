@@ -9,6 +9,9 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import Field
 
 from ccgen.config.capabilities import transliteration_supported
+from ccgen.config.translation_models import DEFAULT_ENGINE as DEFAULT_TRANSLATION_ENGINE
+from ccgen.config.translation_models import ENGINE_KEYS as TRANSLATION_ENGINE_KEYS
+from ccgen.config.translation_models import route as translation_route
 from ccgen.config.voices import voice_by_key
 from ccgen.config.defaults import (
     ComputeDefaults,
@@ -79,11 +82,14 @@ class TranslateConfig(SubtitleOutputConfig):
     task: Literal["translate"] = "translate"
     source_lang: str = TranslationDefaults.DEFAULT_SOURCE_LANG
     target_lang: str = TranslationDefaults.DEFAULT_TARGET_LANG
+    engine: str = DEFAULT_TRANSLATION_ENGINE
+    # Pick the candidate translation closest in meaning to the original, and report lines that drift.
+    meaning_check: bool = True
 
     def __post_init__(self) -> None:
         super().__post_init__()
         require_subtitle_input(self.input_path, "Translation")
-        validate_translate(self.source_lang, self.target_lang)
+        validate_translate(self.source_lang, self.target_lang, self.engine)
 
 
 @dataclass(kw_only=True)
@@ -121,6 +127,8 @@ class DubConfig(TaskConfigBase):
     output: str = DubbingDefaults.DEFAULT_OUTPUT
     default_track: bool = DubbingDefaults.DEFAULT_TRACK
     device: str = DubbingDefaults.DEVICE_AUTO
+    # Voice cloning reads Urdu in Hindi script instead of handing it to a Piper voice.
+    script_bridge: bool = DubbingDefaults.SCRIPT_BRIDGE
     reference_audio: Optional[str] = None
 
     def __post_init__(self) -> None:
@@ -184,9 +192,11 @@ class TranslateStep:
     write_output: bool = True
     source_lang: str = TranslationDefaults.DEFAULT_SOURCE_LANG
     target_lang: str = TranslationDefaults.DEFAULT_TARGET_LANG
+    engine: str = DEFAULT_TRANSLATION_ENGINE
+    meaning_check: bool = True
 
     def __post_init__(self) -> None:
-        validate_translate(self.source_lang, self.target_lang)
+        validate_translate(self.source_lang, self.target_lang, self.engine)
 
 
 @dataclass(kw_only=True)
@@ -219,6 +229,7 @@ class DubStep:
     output: str = DubbingDefaults.DEFAULT_OUTPUT
     default_track: bool = DubbingDefaults.DEFAULT_TRACK
     device: str = DubbingDefaults.DEVICE_AUTO
+    script_bridge: bool = DubbingDefaults.SCRIPT_BRIDGE
 
     def __post_init__(self) -> None:
         validate_dub(
@@ -362,10 +373,17 @@ def validate_generate(model_name: str, device: str, compute_type: str, beam_size
         raise ValueError("Beam size must be at least 1.")
 
 
-def validate_translate(source_lang: str, target_lang: str) -> None:
-    """Reject identical source and target languages; "auto" is resolved at run time."""
+def validate_translate(source_lang: str, target_lang: str, engine: str = DEFAULT_TRANSLATION_ENGINE) -> None:
+    """Reject identical languages, unknown models, and pairs the model can't reach.
+
+    "auto" is resolved at run time, so a pair with an "auto" source is only checked then.
+    """
     if source_lang == target_lang:
         raise ValueError("Choose a target language different from the source language.")
+    if engine not in TRANSLATION_ENGINE_KEYS:
+        raise ValueError(f"Unknown translation model: '{engine}'.")
+    if source_lang != TranslationDefaults.DEFAULT_SOURCE_LANG:
+        translation_route(engine, source_lang, target_lang)
 
 
 def validate_transliterate(engine: str, source_scheme: str, target_scheme: str) -> None:

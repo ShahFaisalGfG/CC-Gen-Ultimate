@@ -12,10 +12,12 @@ from huggingface_hub import scan_cache_dir
 
 from ccgen.config.capabilities import PIVOT_LANGUAGE as _PIVOT_LANG
 from ccgen.config.defaults import LanguageOptions, ModelDefaults, ModelRepos
+from ccgen.config.translation_models import CT2_MODELS, MEANING_MODEL, engine_info
 from ccgen.config.voices import ENGINE_KOKORO, ENGINE_PIPER, ENGINE_XTTS, VOICES, VoiceOption, voice_by_key
 from ccgen.engines.transliteration.neural_engine import NeuralEngine
 from ccgen.engines.transliteration.rekhta_backend import RekhtaBackend
 from ccgen.engines.speech import voice_files
+from ccgen.engines.translation import model_files as translation_files
 from ccgen.engines.translation.argos_engine import install_pair
 from ccgen.utils import model_status
 from ccgen.utils.callbacks import emit_status
@@ -32,6 +34,7 @@ CATEGORY_VOICES = "voices"
 # category has exactly one engine today, but is expected to grow more over time.
 ENGINE_FASTER_WHISPER = "Faster Whisper"
 ENGINE_ARGOS_TRANSLATE = "Argos Translate"
+ENGINE_MEANING_CHECK = "Meaning check"
 ENGINE_NEURAL_M2M100 = "Neural (M2M100)"
 ENGINE_NEURAL_REKHTA = "Neural (Rekhta)"
 ENGINE_XTTS_LABEL = "XTTS-v2 (voice cloning)"
@@ -87,13 +90,17 @@ def download_asset(
     try:
         category, key = _split_id(asset_id)
         # Sent before any category-specific work so the UI leaves "Queued" the moment the
-        # worker actually starts, rather than waiting on a first byte-progress tick that some
+        # worker starts, rather than waiting on a first byte-progress tick that some
         # download paths (large multi-file Hugging Face repos in particular) may report late
         # or not at all.
         emit_status(progress_cb, "Downloading...")
         with cancellable(cancel_check):
             if category == CATEGORY_WHISPER:
                 _download_whisper(key, progress_num_cb)
+            elif category == CATEGORY_TRANSLATION and key in CT2_MODELS:
+                translation_files.ensure_model(CT2_MODELS[key], progress_cb, progress_num_cb)
+            elif category == CATEGORY_TRANSLATION and key == MEANING_MODEL.key:
+                translation_files.ensure_meaning_model(progress_cb, progress_num_cb)
             elif category == CATEGORY_TRANSLATION:
                 install_pair(*_translation_pair(key), progress_num_cb, progress_cb)
             elif category == CATEGORY_TRANSLITERATION:
@@ -115,6 +122,8 @@ def delete_asset(asset_id: str) -> None:
         category, key = _split_id(asset_id)
         if category == CATEGORY_WHISPER:
             _delete_hf_repo(ModelRepos.WHISPER[key])
+        elif category == CATEGORY_TRANSLATION and (key in CT2_MODELS or key == MEANING_MODEL.key):
+            translation_files.remove_model(key)
         elif category == CATEGORY_TRANSLATION:
             _delete_translation_pair(*_translation_pair(key))
         elif category == CATEGORY_TRANSLITERATION:
@@ -146,8 +155,29 @@ def _whisper_assets(cache_info: Optional[Any]) -> list[AssetInfo]:
 
 
 def _translation_assets() -> list[AssetInfo]:
-    """Build the Translation Languages category rows: each language to and from English."""
+    """Build the Translation category rows: CTranslate2 models first, then Argos packages."""
     assets: list[AssetInfo] = []
+    for model in CT2_MODELS.values():
+        downloaded = translation_files.is_ready(model.key, model.revision)
+        assets.append(AssetInfo(
+            id=f"{CATEGORY_TRANSLATION}:{model.key}",
+            category=CATEGORY_TRANSLATION,
+            engine=engine_info(model.engine).label,
+            label=model.label,
+            downloaded=downloaded,
+            size_bytes=translation_files.folder_size(model.key) if downloaded else None,
+            approx_size_mb=model.download_mb,
+        ))
+    meaning_ready = translation_files.is_ready(MEANING_MODEL.key, MEANING_MODEL.revision)
+    assets.append(AssetInfo(
+        id=f"{CATEGORY_TRANSLATION}:{MEANING_MODEL.key}",
+        category=CATEGORY_TRANSLATION,
+        engine=ENGINE_MEANING_CHECK,
+        label="Compares each translation with the original (50+ languages)",
+        downloaded=meaning_ready,
+        size_bytes=translation_files.folder_size(MEANING_MODEL.key) if meaning_ready else None,
+        approx_size_mb=MEANING_MODEL.download_mb,
+    ))
     for name, code in LanguageOptions.TRANSLATION_TARGETS:
         if code == _PIVOT_LANG:
             continue  # "English → English" isn't a real, installable pair

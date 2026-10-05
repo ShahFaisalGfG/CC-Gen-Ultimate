@@ -13,6 +13,7 @@ from ccgen.config.defaults import (
     TransliterationDefaults,
     get_default_settings,
 )
+from ccgen.config.translation_models import ENGINES as TRANSLATION_ENGINES
 from ccgen.controllers.api_client import ApiClient
 
 
@@ -99,6 +100,11 @@ class PrefsController(QObject):
     def targetOptions(self) -> list:
         """Translation target languages."""
         return _items(LanguageOptions.TRANSLATION_TARGETS)
+
+    @Property(list, constant=True)
+    def translationEngineOptions(self) -> list:
+        """Translation models with the trade-offs of each, the recommended one first."""
+        return [{"label": e.label, "code": e.key, "hint": e.hint} for e in TRANSLATION_ENGINES]
 
     @Property(list, constant=True)
     def sourceOptions(self) -> list:

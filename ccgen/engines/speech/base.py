@@ -28,6 +28,9 @@ class SpeechEngine(ABC):
         self.voice = voice
         self._device_preference = device
         self.device_label = ""
+        # True when the last synthesize() call had to cut speech that ran on past its text
+        # (XTTS-v2's runaway sampling); the dub reports those lines.
+        self.last_line_capped = False
 
     @abstractmethod
     def load(self, status_cb: StatusCb = None, progress_cb: ProgressCb = None) -> None:

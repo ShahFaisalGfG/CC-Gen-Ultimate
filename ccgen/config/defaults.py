@@ -109,10 +109,13 @@ class TranscriptionDefaults:
 
 
 class TranslationDefaults:
-    """argostranslate defaults."""
+    """Translation defaults (the models themselves are listed in translation_models.py)."""
 
     DEFAULT_SOURCE_LANG = "auto"
     DEFAULT_TARGET_LANG = "en"
+    # OPUS-MT; kept as a literal here so this module needn't import the model catalog.
+    DEFAULT_ENGINE = "opus_mt"
+    MEANING_CHECK = True
 
 
 class OutputDefaults:
@@ -236,7 +239,8 @@ class DubbingDefaults:
     MODES: list[tuple[str, str, str]] = [
         ("Voice cloning (XTTS-v2)", MODE_XTTS,
          "Clones each original speaker for the most natural dub. Slow without a GPU, a 1.9 GB "
-         "download, speaks every language here except Urdu, and allows non-commercial use only."),
+         "download, speaks every language here (Urdu by reading it in Hindi script), and allows "
+         "non-commercial use only."),
         ("Natural voices (Kokoro)", MODE_KOKORO,
          "Very natural stock voices that run fast on any computer. 350 MB; English, Spanish, French, "
          "Hindi, Japanese, Portuguese, and Chinese."),
@@ -245,6 +249,9 @@ class DubbingDefaults:
          "About 60 MB per voice; sounds more synthetic."),
     ]
     VOICE_AUTO = "auto"
+    # Voice cloning has no Urdu model; on, it reads Urdu lines in Hindi script with the cloned
+    # voices, off, Urdu falls back to a Piper voice.
+    SCRIPT_BRIDGE = True
     LANGUAGE_AUTO = "auto"
     SPEAKERS_AUTO = "auto"
     SPEAKERS_SINGLE = "single"
@@ -294,6 +301,9 @@ def get_default_settings() -> dict[str, Any]:
         "translation": {
             "source_lang": TranslationDefaults.DEFAULT_SOURCE_LANG,
             "target_lang": TranslationDefaults.DEFAULT_TARGET_LANG,
+            "engine": TranslationDefaults.DEFAULT_ENGINE,
+            "meaning_check": TranslationDefaults.MEANING_CHECK,
+            "nllb_terms_accepted": False,
         },
         "output": {
             "directory": OutputDefaults.DIRECTORY,
@@ -321,6 +331,7 @@ def get_default_settings() -> dict[str, Any]:
             "output": DubbingDefaults.DEFAULT_OUTPUT,
             "default_track": DubbingDefaults.DEFAULT_TRACK,
             "device": DubbingDefaults.DEVICE_AUTO,
+            "script_bridge": DubbingDefaults.SCRIPT_BRIDGE,
             "xtts_terms_accepted": False,
         },
         "ui": {

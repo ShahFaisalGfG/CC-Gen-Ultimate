@@ -25,6 +25,10 @@ XTTS_LANGUAGES: dict[str, str] = {
     "tr": "tr", "ru": "ru", "nl": "nl", "cs": "cs", "ar": "ar", "zh": "zh-cn", "ja": "ja",
     "hu": "hu", "ko": "ko", "hi": "hi",
 }
+# Languages XTTS-v2 can still speak by reading them in another language's script. Spoken Urdu
+# and Hindi share their sounds, so Urdu lines written in Devanagari are read as Urdu.
+XTTS_SCRIPT_BRIDGE: dict[str, str] = {"ur": "hi"}
+_SCRIPT_NAMES = {"hi": "Hindi"}
 # The Kokoro catalog names some languages differently from the eSpeak voices Kokoro
 # pronounces with; eSpeak rejects "fr" and "zh" and needs these names instead.
 _ESPEAK_LOCALES = {"fr": "fr-fr", "zh": "cmn"}
@@ -58,6 +62,9 @@ class VoiceOption:
     locale: str = ""
     approx_size_bytes: int = 0
     grade: str = ""
+    # XTTS only: the language whose script the lines are rewritten in before speaking (see
+    # XTTS_SCRIPT_BRIDGE), or "" when the voice speaks its language directly.
+    bridge: str = ""
 
     @property
     def key(self) -> str:
@@ -94,24 +101,31 @@ VOICES = _load_catalogs()
 
 
 def xtts_voice(language: str) -> VoiceOption:
-    """The cloning pseudo-voice for one XTTS language."""
+    """The cloning pseudo-voice for one XTTS language, bridged through another script if needed."""
+    if language in XTTS_LANGUAGES:
+        return VoiceOption(
+            engine=ENGINE_XTTS, voice_id="clone", language=language,
+            label="Clone the original speaker", model_path=XTTS_LANGUAGES[language],
+        )
+    bridge = XTTS_SCRIPT_BRIDGE[language]
     return VoiceOption(
         engine=ENGINE_XTTS, voice_id="clone", language=language,
-        label="Clone the original speaker", model_path=XTTS_LANGUAGES[language],
+        label=f"Clone the original speaker (read in {_SCRIPT_NAMES[bridge]} script)",
+        model_path=XTTS_LANGUAGES[bridge], bridge=bridge,
     )
 
 
-def engine_supports(engine: str, language: str) -> bool:
-    """True when `engine` can speak `language`."""
+def engine_supports(engine: str, language: str, bridge: bool = True) -> bool:
+    """True when `engine` can speak `language`; `bridge` lets XTTS read it in another script."""
     if engine == ENGINE_XTTS:
-        return language in XTTS_LANGUAGES
+        return language in XTTS_LANGUAGES or (bridge and language in XTTS_SCRIPT_BRIDGE)
     return any(v.engine == engine and v.language == language for v in VOICES)
 
 
-def voices_for(engine: str, language: str) -> list[VoiceOption]:
+def voices_for(engine: str, language: str, bridge: bool = True) -> list[VoiceOption]:
     """Voices `engine` offers for `language`, best first."""
     if engine == ENGINE_XTTS:
-        return [xtts_voice(language)] if language in XTTS_LANGUAGES else []
+        return [xtts_voice(language)] if engine_supports(engine, language, bridge) else []
     voices = [v for v in VOICES if v.engine == engine and v.language == language]
     preferred = _PREFERRED_PIPER.get(language) if engine == ENGINE_PIPER else None
     return sorted(voices, key=lambda v: v.voice_id != preferred)
@@ -127,24 +141,32 @@ def resolve_voice(
     mode: str,
     voice_key: str = DubbingDefaults.VOICE_AUTO,
     can_clone: bool = True,
+    bridge: bool = DubbingDefaults.SCRIPT_BRIDGE,
 ) -> tuple[VoiceOption, Optional[str]]:
-    """Choose the voice to dub `language` with, and a warning when it isn't the requested one.
+    """Choose the voice to dub `language` with, and a note when it isn't the requested one.
 
     The requested mode wins whenever it can speak the language (and, for XTTS, a reference
     recording exists to clone). Otherwise the next engine in XTTS, Kokoro, Piper order is used.
+    With `bridge`, XTTS speaks Urdu by reading it in Hindi script, which the note says.
     Raises ValueError when no engine speaks the language or a named voice is for another one.
     """
     def usable(engine: str) -> bool:
-        return engine_supports(engine, language) and (engine != ENGINE_XTTS or can_clone)
+        return engine_supports(engine, language, bridge) and (engine != ENGINE_XTTS or can_clone)
 
     engine = mode if usable(mode) else next((e for e in ENGINES if usable(e)), None)
     if engine is None:
         raise ValueError(f"No dubbing voice speaks '{language}'.")
     warning = None
     if engine != mode:
-        reason = "has no original voice to clone" if mode == ENGINE_XTTS and engine_supports(mode, language) \
+        reason = "has no original voice to clone" if mode == ENGINE_XTTS and engine_supports(mode, language, bridge) \
             else f"can't speak '{language}'"
         warning = f"{ENGINE_LABELS[mode]} {reason}, so {ENGINE_LABELS[engine]} was used instead."
+    elif engine == ENGINE_XTTS and language in XTTS_SCRIPT_BRIDGE:
+        script = _SCRIPT_NAMES[XTTS_SCRIPT_BRIDGE[language]]
+        warning = (
+            f"{ENGINE_LABELS[engine]} can't speak '{language}' directly, so it read the lines in "
+            f"{script} script with the cloned voices; a few words may sound {script}-accented."
+        )
     if engine == mode and voice_key != DubbingDefaults.VOICE_AUTO and engine != ENGINE_XTTS:
         voice = voice_by_key(voice_key)
         if voice is None or voice.engine != engine:

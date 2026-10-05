@@ -81,6 +81,8 @@ AppWindow {
         languageCombo.selectCode(saved("transcription.language", "") || "")
         deviceCombo.selectCode(saved("model.device", "auto"))
         vadSwitch.checked = saved("transcription.vad_filter", true)
+        translationEngineCombo.selectCode(saved("translation.engine", "opus_mt"))
+        meaningCheckSwitch.checked = saved("translation.meaning_check", true)
         sourceCombo.selectCode(saved("translation.source_lang", "auto"))
         targetCombo.selectCode(saved("translation.target_lang", "en"))
         translitSourceCombo.selectCode(saved("transliteration.source", "roman"))
@@ -91,6 +93,7 @@ AppWindow {
         speedupSpin.value = Math.round(saved("dubbing.max_speedup", 1.35) * 100)
         dubOutputCombo.selectCode(saved("dubbing.output", "track"))
         defaultTrackSwitch.checked = saved("dubbing.default_track", false)
+        scriptBridgeSwitch.checked = saved("dubbing.script_bridge", true)
         dubDeviceCombo.selectCode(saved("dubbing.device", "auto"))
         lineLengthSpin.value = saved("output.max_line_length", 42)
         maxLinesSpin.value = saved("output.max_lines", 2)
@@ -312,7 +315,19 @@ AppWindow {
                     Card {
                         Layout.fillWidth: true
                         title: "Default translation"
-                        description: "Used by the Translate tab and new workflow steps. Language packages download the first time a pair is used."
+                        description: "Used by the Translate tab and new workflow steps. Models download the first time a pair is used."
+                        FormRow {
+                            label: "Translation model"
+                            hint: (prefsController.translationEngineOptions[translationEngineCombo.currentIndex] || { hint: "" }).hint
+                            StyledComboBox {
+                                id: translationEngineCombo
+                                Layout.fillWidth: true
+                                accessibleName: "Default translation model"
+                                toolTipText: "Which offline model translates subtitles."
+                                model: prefsController.translationEngineOptions
+                                onActivated: prefsWin.set("translation.engine", currentValue)
+                            }
+                        }
                         FormRow {
                             label: "Translate from"
                             hint: "Detect reads the language from names like movie_en.srt, or from the tab a file came from."
@@ -335,6 +350,17 @@ AppWindow {
                                 model: prefsController.targetOptions
                                 onActivated: prefsWin.set("translation.target_lang", currentValue)
                             }
+                        }
+                        FormRow {
+                            label: "Meaning check"
+                            hint: "Picks the translation that keeps the original's meaning best and notes lines that may drift. Adds a 120 MB model."
+                            AppSwitch {
+                                id: meaningCheckSwitch
+                                onToggled: prefsWin.set("translation.meaning_check", checked)
+                                accessibleName: "Meaning check"
+                                toolTipText: "Compare each translation with the original sentence."
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                     }
                 }
@@ -411,6 +437,17 @@ AppWindow {
                                 model: prefsController.speakerOptions
                                 onActivated: prefsWin.set("dubbing.speakers", currentValue)
                             }
+                        }
+                        FormRow {
+                            label: "Urdu in Hindi script"
+                            hint: "Voice cloning can't speak Urdu directly. On, it reads Urdu lines in Hindi script with the cloned voices; a few words may sound Hindi-accented. Off, Urdu uses a Piper voice."
+                            AppSwitch {
+                                id: scriptBridgeSwitch
+                                onToggled: prefsWin.set("dubbing.script_bridge", checked)
+                                accessibleName: "Read Urdu in Hindi script"
+                                toolTipText: "Keep the cloned voices for Urdu by reading the lines in Hindi script."
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                         FormRow {
                             label: "Fastest speech"
