@@ -344,6 +344,8 @@ pip install "pyinstaller>=6.17"
 Each build first installs the PyTorch build for its GPU edition and the DirectML build of ONNX Runtime into the active environment (see `Install-GpuRuntime` in `scripts/bundle.ps1`).
 
 The PyInstaller options live in `scripts/bundle.ps1`, shared by every build script and the release workflow. After bundling, each build runs the app with `--self-test`, which imports every engine, loads the native libraries, decodes a short audio clip, loads the dubbing voices' pronunciation data and dictionaries, starts the local API, and compiles every QML screen. It also lists the GPUs each runtime can use. A module or DLL missing from the bundle stops the build with a report instead of reaching users. You can run the same check on any build yourself: `CC-Gen-Ultimate.exe --self-test report.txt`.
+
+Every icon size and `CCGenUltimate.ico` are drawn by `scripts/make_icons.py`; after changing it, run `python scripts/make_icons.py` to regenerate them.
 ---
 
 ## Troubleshooting

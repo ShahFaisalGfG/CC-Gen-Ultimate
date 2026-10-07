@@ -22,6 +22,7 @@ The first Windows release of CC-Gen-Ultimate: a free, fully offline subtitle and
 - New layout: one tab per job, each with its queue on the left, Settings and live Results on the right, and an action bar with overall progress, the current step, and Start / Cancel. Overall progress counts every step of a file, so it never jumps backwards.
 - Live results show each subtitle with its translation underneath as it is produced, and stay visible after the run.
 - Choose where subtitles are saved, or keep them next to each source file. "Open output folder" appears when a run finishes.
+- A new app icon: a bold white "CC" on a pink-to-violet tile that stays readable at taskbar size, in the same shape as gfgLock's icon. The splash screen's progress bar uses its colours, and `scripts/make_icons.py` draws every size and the `.ico`.
 - Every window resizes from any edge, follows the Windows light or dark theme (including switching while the app is open), and uses consistent icons and colors with readable contrast.
 - Tooltips explain every option, and download badges show which models are already on this computer.
 - Keyboard shortcuts: **Ctrl+O** add files, **Ctrl+Shift+O** add folder, **Ctrl+Enter** start, **Esc** cancel, **Ctrl+,** preferences, **Ctrl+M** manage models, **Ctrl+1 to Ctrl+5** switch tabs, **Delete** remove selected files, **F1** about.
