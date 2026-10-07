@@ -124,7 +124,7 @@ winget install gfgRoyal.CCGenUltimate
 
 ### Option 2 - Installers
 
-Once published, installers will be available on the [Releases](https://github.com/ShahFaisalGfG/CC-Gen-UItimate/releases) page:
+Once published, installers will be available on the [Releases](https://github.com/ShahFaisalGfG/CC-Gen-Ultimate/releases) page:
 
 | Package | Admin Required | Best For |
 | --- | :---: | --- |
@@ -303,8 +303,8 @@ All settings persist to `%APPDATA%\CC-Gen-Ultimate\settings.json` and apply to e
 
 ```powershell
 # 1. Clone the repository
-git clone https://github.com/ShahFaisalGfG/CC-Gen-UItimate.git
-cd CC-Gen-UItimate
+git clone https://github.com/ShahFaisalGfG/CC-Gen-Ultimate.git
+cd CC-Gen-Ultimate
 
 # 2. Create and activate a virtual environment
 python -m venv .venv
@@ -370,7 +370,7 @@ Every icon size and `CCGenUltimate.ico` are drawn by `scripts/make_icons.py`; af
 | "Nothing was written in ..., so the text is unchanged" | The subtitles are in a different script from the one chosen under **Scripts**; pick the script they are written in |
 | Dubbing doesn't use the GPU | The self-test (`CC-Gen-Ultimate.exe --self-test report.txt`) lists the devices found. Use the Intel GPU edition for Intel Arc or Core Ultra graphics |
 
-Still stuck? [Open an issue](https://github.com/ShahFaisalGfG/CC-Gen-UItimate/issues) with your log output and CC-Gen-Ultimate version - I'll get back to you.
+Still stuck? [Open an issue](https://github.com/ShahFaisalGfG/CC-Gen-Ultimate/issues) with your log output and CC-Gen-Ultimate version - I'll get back to you.
 
 ---
 
@@ -386,7 +386,7 @@ Contributions of all kinds are welcome - bug reports, fixes, new features, trans
    - `qmllint` passes on all edited `.qml` files
 4. Commit with a clear message and open a **Pull Request** targeting the `development` branch
 
-For significant changes, please [open an issue](https://github.com/ShahFaisalGfG/CC-Gen-UItimate/issues) first to discuss the approach.
+For significant changes, please [open an issue](https://github.com/ShahFaisalGfG/CC-Gen-Ultimate/issues) first to discuss the approach.
 
 ---
 
@@ -400,7 +400,7 @@ For significant changes, please [open an issue](https://github.com/ShahFaisalGfG
 | **Later** | macOS package (`.dmg` / Homebrew) |
 | **Later** | Android release |
 
-Have a feature idea or a use case not covered above? [Start a discussion](https://github.com/ShahFaisalGfG/CC-Gen-UItimate/discussions).
+Have a feature idea or a use case not covered above? [Start a discussion](https://github.com/ShahFaisalGfG/CC-Gen-Ultimate/discussions).
 
 ---
 
@@ -424,7 +424,7 @@ CC-Gen-Ultimate is free and will always stay free. If it's saved you time or hel
 - 🔁 **Share it** - tell a friend, post it in a forum, or mention it in a blog post
 - 🛠️ **Contribute code** - PRs are always welcome; see [Contributing](#contributing)
 
-**[★ Star CC-Gen-Ultimate on GitHub](https://github.com/ShahFaisalGfG/CC-Gen-UItimate)**
+**[★ Star CC-Gen-Ultimate on GitHub](https://github.com/ShahFaisalGfG/CC-Gen-Ultimate)**
 
 ---
 

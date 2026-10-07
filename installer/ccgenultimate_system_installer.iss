@@ -226,7 +226,7 @@ Root: HKLM; Subkey: "SOFTWARE\{#MyAppPublisher}\{#MyAppName}"; ValueType: string
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-Filename: "https://github.com/ShahFaisalGfG/CC-Gen-UItimate"; Description: "View README on GitHub"; Flags: shellexec nowait postinstall skipifsilent
+Filename: "https://github.com/ShahFaisalGfG/CC-Gen-Ultimate"; Description: "View README on GitHub"; Flags: shellexec nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillCcGenUltimate"
