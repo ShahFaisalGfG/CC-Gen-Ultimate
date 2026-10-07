@@ -1,10 +1,13 @@
 # dubbing.py - lay spoken cues out on a timeline and add the result to the source media
 #
-# Each cue's speech starts at the cue's start time. Its slot runs until the next cue starts, so
-# speech may spill into a following silence. Speech that doesn't fit is spoken faster, up to a
-# limit; anything still too long is faded out at the slot's end and reported, so one wordy line
-# never fails a whole film. The track is written to disk as it grows, so a long film never has
-# to fit in memory.
+# Cues are spoken a sentence at a time: a sentence split over several cues (as translations are)
+# is said once, with natural intonation, in the time of all its cues. Each sentence starts at its
+# first cue's start time, and its slot runs until the next sentence starts, so speech may spill
+# into a following silence. Speech that doesn't fit is spoken faster, up to a limit; speech still
+# too long may run up to a second into the next sentence's time, which then starts later, rather
+# than lose its last words. Only beyond that, or past the end of the media, is it faded out and
+# reported, so one wordy line never fails a whole film. The track is written to disk as it grows,
+# so a long film never has to fit in memory.
 #
 # The finished track is muxed in-process with PyAV: video, original audio, subtitles, fonts,
 # chapters, and metadata are copied untouched, and the dub is added as one more AAC track.
@@ -22,7 +25,9 @@ import numpy as np
 
 from ccgen.config.defaults import DubbingDefaults
 from ccgen.core import Segment
+from ccgen.core.cues import join_unit_text, sentence_units
 from ccgen.engines.speech.base import SpeechEngine
+from ccgen.engines.speech.line_check import FAILED_CER, LineChecker
 from ccgen.utils.callbacks import JobCancelled
 
 _log = logging.getLogger(__name__)
@@ -31,6 +36,10 @@ TRACK_RATE = DubbingDefaults.TRACK_RATE
 # The last cue may run this far past its own end, since no next cue bounds it.
 _LAST_CUE_TAIL_S = 1.0
 _FADE_S = 0.03
+# A line the line check rejects is spoken again up to this many times; the best take is kept.
+_RETAKES = 2
+# A line that doesn't fit at the fastest allowed speed may run this far into the next line's time.
+_MAX_DELAY_S = 1.0
 # Encode the dub this far ahead of the source packets being copied, so the muxer can interleave.
 _MUX_LEAD_S = 0.5
 _AAC_FRAME = 1024
@@ -58,10 +67,18 @@ class TrackReport:
     trimmed: list[int] = field(default_factory=list)
     # Lines where the voice kept talking past the text and the extra speech was cut.
     ran_on: list[int] = field(default_factory=list)
+    # Lines the line check had to speak again, and those still unclear after every retake.
+    retaken: list[int] = field(default_factory=list)
+    unclear: list[int] = field(default_factory=list)
 
     def warnings(self) -> list[str]:
         """User-facing notes about lines that could not be spoken in full or as written."""
         notes = []
+        if self.unclear:
+            notes.append(
+                f"{len(self.unclear)} line(s) may be hard to understand even after being spoken again "
+                f"(subtitle {_numbers(self.unclear)}). Listen to them, and reword or dub again if needed."
+            )
         if self.ran_on:
             notes.append(
                 f"{len(self.ran_on)} line(s) kept talking past their text, so the extra speech was cut "
@@ -88,30 +105,73 @@ def synthesize_track(
     output_path: str,
     progress: Progress = None,
     cancelled: Optional[CancelCheck] = None,
+    checker: Optional[LineChecker] = None,
+    language: str = "",
+    end: Optional[float] = None,
 ) -> TrackReport:
-    """Speak every cue at its start time and write the mono 16-bit track to `output_path`."""
+    """Speak every sentence at its first cue's time and write the mono 16-bit track to `output_path`.
+
+    With a `checker`, every line is heard back and spoken again when it comes out garbled.
+    `language` decides how a sentence's cues are joined (no spaces for Chinese and Japanese).
+    No speech runs past `end`, the media's length in seconds, where the dub track is cut.
+    Notes name each sentence by its first subtitle's number.
+    """
     report = TrackReport()
+    units = spoken_units(cues, speakers, language)
+    end_frame = round(end * TRACK_RATE) if end is not None else None
+    slot_ends = _slot_ends(cues, units, end)
     with wave.open(output_path, "wb") as track:
         track.setnchannels(1)
         track.setsampwidth(2)
         track.setframerate(TRACK_RATE)
         written = 0
-        for index, cue in enumerate(cues):
+        for number, (members, text) in enumerate(units):
             if cancelled is not None and cancelled():
                 raise JobCancelled()
-            text = cue["text"].strip()
-            if text:
-                start = max(round(cue["start"] * TRACK_RATE), written)
-                slot_end = cues[index + 1]["start"] if index + 1 < len(cues) else cue["end"] + _LAST_CUE_TAIL_S
-                slot = max(round(slot_end * TRACK_RATE) - start, 1)
-                clip = _speak_to_fit(engine, text, speakers[index], slot, max_speedup, report, index + 1)
+            start = max(round(cues[members[0]]["start"] * TRACK_RATE), written)
+            if end_frame is not None and start >= end_frame:
+                report.trimmed.append(members[0] + 1)  # it would start after the media ends
+            else:
+                slot = max(round(slot_ends[number] * TRACK_RATE) - start, 1)
+                room = slot + round(_MAX_DELAY_S * TRACK_RATE)
+                if end_frame is not None:
+                    room = min(room, end_frame - start)
+                    slot = min(slot, room)
+                line = _Line(text, speakers[members[0]], slot, room)
+                clip = _speak_checked(engine, line, max_speedup, report, members[0] + 1, checker)
                 _write_silence(track, start - written)
                 track.writeframes(_to_pcm(clip))
                 written = start + clip.size
                 report.spoken += 1
             if progress:
-                progress(index + 1, len(cues))
+                progress(members[-1] + 1, len(cues))
     return report
+
+
+def _slot_ends(cues: list[Segment], units: list[tuple[list[int], str]], end: Optional[float]) -> list[float]:
+    """When each sentence's time ends: where the next one starts, or after the last cue."""
+    ends = [cues[members[0]]["start"] for members, _ in units[1:]]
+    if units:
+        last = cues[units[-1][0][-1]]["end"] + _LAST_CUE_TAIL_S
+        ends.append(min(last, end) if end is not None else last)
+    return ends
+
+
+def spoken_units(cues: list[Segment], speakers: list[int], language: str) -> list[tuple[list[int], str]]:
+    """The lines to speak: each sentence's cues (only one speaker's) and their joined text."""
+    units: list[tuple[list[int], str]] = []
+    for sentence in sentence_units(cues):
+        group: list[int] = []
+        for index in sentence:
+            if not cues[index]["text"].strip():
+                continue
+            if group and speakers[index] != speakers[group[-1]]:
+                units.append((group, join_unit_text([cues[i] for i in group], language)))
+                group = []
+            group.append(index)
+        if group:
+            units.append((group, join_unit_text([cues[i] for i in group], language)))
+    return units
 
 
 def attach_track(
@@ -148,7 +208,8 @@ def attach_track(
             # its type stubs mark the attribute read-only although the setter exists.
             dub_stream.disposition = dub_flags.value  # type: ignore[misc]
             _copy_chapters(source, target)
-            limit = _duration_frames(source)
+            seconds = _duration_seconds(source)
+            limit = int(seconds * TRACK_RATE) if seconds is not None else None
             # Copied packets keep the source's timestamps, which often don't start at zero
             # (.ts and .m2ts files usually start a second or more in), while cue times count from
             # the first sample of audio. The dub starts where the source does to stay in sync.
@@ -246,38 +307,92 @@ def _copy_chapters(source, target) -> None:
         _log.debug("Chapters were not copied", exc_info=True)
 
 
-def _duration_frames(container) -> Optional[int]:
-    """Source length in dub-track samples, or None when unknown."""
+def media_seconds(path: str) -> Optional[float]:
+    """How long a media file plays, in seconds, or None when its container doesn't say."""
+    with av.open(path) as container:
+        return _duration_seconds(container)
+
+
+def _duration_seconds(container) -> Optional[float]:
+    """Source length in seconds, or None when unknown."""
     if container.duration is not None and container.duration > 0:
-        return int(container.duration / av.time_base * TRACK_RATE)
+        return container.duration / av.time_base
     lengths = [
         float(s.duration * s.time_base) for s in container.streams
         if s.duration is not None and s.time_base is not None
     ]
-    return int(max(lengths) * TRACK_RATE) if lengths else None
+    return max(lengths) if lengths else None
 
 
-def _speak_to_fit(
+@dataclass
+class _Line:
+    """One sentence to speak: its text and speaker, the samples until the next sentence starts
+    (`slot`), and the most it may take, running into the next sentence's time (`room`)."""
+
+    text: str
+    speaker: int
+    slot: int
+    room: int
+
+
+@dataclass
+class _Take:
+    """One spoken version of a line, fitted to its slot."""
+
+    clip: np.ndarray
+    sped_up: bool
+    trimmed: bool
+    ran_on: bool
+    error: float = 0.0
+
+
+def _speak_checked(
     engine: SpeechEngine,
-    text: str,
-    speaker: int,
-    slot: int,
+    line: _Line,
     max_speedup: float,
     report: TrackReport,
     number: int,
+    checker: Optional[LineChecker],
 ) -> np.ndarray:
-    """Synthesize `text` at TRACK_RATE so it fits `slot` samples, speeding up or trimming."""
-    clip = _resample(*engine.synthesize(text, 1.0, speaker))
-    if engine.last_line_capped:
-        report.ran_on.append(number)
-    if clip.size > slot and max_speedup > 1.0:
-        speed = min(clip.size / slot, max_speedup)
-        clip = _resample(*engine.retime(text, speed, speaker))
-        report.sped_up += 1
-    if clip.size > slot:
-        clip = _fade_out(clip[:slot])
+    """Speak a line to fit its slot; with a checker, retake a garbled line and keep the best take."""
+    best: Optional[_Take] = None
+    for attempt in range(1 + (_RETAKES if checker is not None else 0)):
+        take = _speak_to_fit(engine, line, max_speedup)
+        if checker is not None:
+            take.error = checker.score(take.clip, TRACK_RATE, line.text)
+        if best is None or take.error < best.error:
+            best = take
+        if take.error < FAILED_CER:
+            break
+        if attempt == 0:
+            report.retaken.append(number)
+    assert best is not None
+    if best.error >= FAILED_CER:
+        report.unclear.append(number)
+    report.sped_up += int(best.sped_up)
+    if best.trimmed:
         report.trimmed.append(number)
-    return clip
+    if best.ran_on:
+        report.ran_on.append(number)
+    return best.clip
+
+
+def _speak_to_fit(engine: SpeechEngine, line: _Line, max_speedup: float) -> _Take:
+    """Synthesize a line at TRACK_RATE to fit its slot, speeding up, or trimming beyond its room."""
+    text, speaker, slot = line.text, line.speaker, line.slot
+    speed = 1.0
+    planned = engine.natural_seconds(text, speaker)
+    if planned is not None and max_speedup > 1.0:
+        speed = min(max(planned * TRACK_RATE / slot, 1.0), max_speedup)
+    clip = _resample(*engine.synthesize(text, speed, speaker))
+    ran_on = engine.last_line_capped
+    if clip.size > slot and max_speedup > speed:
+        speed = min(speed * clip.size / slot, max_speedup)
+        clip = _resample(*engine.retime(text, speed, speaker))
+    trimmed = clip.size > line.room
+    if trimmed:
+        clip = _fade_out(clip[:line.room])
+    return _Take(clip, speed > 1.0, trimmed, ran_on)
 
 
 def _resample(samples: np.ndarray, rate: int) -> np.ndarray:

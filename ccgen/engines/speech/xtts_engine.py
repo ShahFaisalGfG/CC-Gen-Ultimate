@@ -6,7 +6,7 @@
 
 import logging
 import os
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -16,16 +16,19 @@ from TTS.tts.models.xtts import Xtts
 
 from ccgen.engines.devices import Accelerator, first_working, torch_accelerators
 from ccgen.engines.model_cache import ModelCache
-from ccgen.engines.speech.base import REFERENCE_RATE, CloningEngine, ProgressCb, StatusCb, split_for_speech
+from ccgen.engines.speech.base import (
+    REFERENCE_RATE,
+    CloningEngine,
+    ProgressCb,
+    StatusCb,
+    finish_sentence,
+    split_for_speech,
+)
 from ccgen.engines.speech.numbers import spell_numbers, spells_numbers
 from ccgen.engines.speech.voice_files import ensure_xtts
-from ccgen.engines.transliteration.urdu_devanagari import urdu_to_devanagari
 from ccgen.utils.callbacks import emit_status
 
 _log = logging.getLogger(__name__)
-
-# How a bridged voice (see voices.XTTS_SCRIPT_BRIDGE) rewrites its lines: (language, bridge).
-_BRIDGE_WRITERS: dict[tuple[str, str], Callable[[str], str]] = {("ur", "hi"): urdu_to_devanagari}
 
 _models: ModelCache[tuple[Xtts, str]] = ModelCache("XTTS-v2")
 _WARMUP_TEXT = "Hello."
@@ -61,11 +64,8 @@ class XttsEngine(CloningEngine):
             return model, accelerator.label
 
         self._model, self.device_label = _models.get_or_load(self._device_preference, loader)
-        # The tokenizer language: the voice's own, or the bridge language whose script it reads.
+        # The tokenizer's language code (zh-cn for Chinese).
         self._language = self.voice.model_path
-        self._write = _BRIDGE_WRITERS[(self.voice.language, self.voice.bridge)] if self.voice.bridge else None
-        # Bridged Urdu keeps its own number words (sifr, not shunya for zero).
-        self._numbers = self.voice.language if self.voice.bridge else self._language
         self._speakers: dict[int, tuple[Any, Any]] = {}
         # The last line's GPT output per piece, so retime() only reruns the fast audio decoder.
         self._last_line: Optional[tuple[str, int, list[Any]]] = None
@@ -105,9 +105,8 @@ class XttsEngine(CloningEngine):
         if speaker not in self._speakers:
             raise RuntimeError(f"No reference voice was registered for speaker {speaker}.")
         gpt_latent, embedding = self._speakers[speaker]
-        spoken = self._write(text) if self._write else text
-        if spells_numbers(self._numbers):
-            spoken = spell_numbers(spoken, self._numbers)
+        spoken = finish_sentence(text, self.voice.language)
+        spoken = spell_numbers(spoken, self._language) if spells_numbers(self._language) else spoken
         # XTTS cuts audio short past a per-language length, and its own splitter loads spaCy
         # pipelines (Japanese needs SudachiPy), so long lines are split here instead.
         limit = self._model.tokenizer.char_limits.get(self._language.split("-")[0], _DEFAULT_CHAR_LIMIT)

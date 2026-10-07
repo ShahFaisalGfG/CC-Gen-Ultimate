@@ -111,19 +111,21 @@ AppWindow {
     }
 
     // Models licensed for non-commercial use only ask for their licence once before the
-    // first download: XTTS-v2 voice cloning and the NLLB-200 translation model.
+    // first download: OmniVoice and XTTS-v2 voice cloning, and the NLLB-200 translation model.
     readonly property var licensedModels: ({
-        "voices:xtts": { model: "xtts", section: "dubbing", key: "xtts_terms_accepted" },
-        "translation:nllb-1.3b": { model: "nllb", section: "translation", key: "nllb_terms_accepted" }
+        "voices:omnivoice": "omnivoice",
+        "voices:xtts": "xtts",
+        "translation:nllb-1.3b": "nllb"
     })
 
     function requestDownload(id) {
-        var licensed = manageWin.licensedModels[id]
-        if (licensed) {
-            var section = prefsController.settings[licensed.section]
-            if (!(section && section[licensed.key])) {
+        var model = manageWin.licensedModels[id]
+        if (model) {
+            var setting = prefsController.modelTerms(model).setting.split(".")
+            var section = prefsController.settings[setting[0]]
+            if (!(section && section[setting[1]])) {
                 termsDialog.pendingId = id
-                termsDialog.model = licensed.model
+                termsDialog.model = model
                 termsDialog.open()
                 return
             }
@@ -153,13 +155,11 @@ AppWindow {
     }
 
     // Remove-confirmation for bulk actions: `ids` are removed when the user confirms.
-    Dialog {
+    AppDialog {
         id: confirmRemove
         property var ids: []
         property string message: ""
         title: "Remove downloaded models?"
-        modal: true
-        anchors.centerIn: parent
         standardButtons: Dialog.Yes | Dialog.Cancel
         Text {
             width: 360

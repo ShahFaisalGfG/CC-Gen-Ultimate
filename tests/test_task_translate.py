@@ -77,9 +77,17 @@ class TestConfig:
         with pytest.raises(ValueError, match="OPUS-MT has no model from 'en' to 'ja'"):
             TranslateConfig(input_path=str(tmp_path / "a.srt"), source_lang="en", target_lang="ja", engine="opus_mt")
 
-    def test_opus_mt_with_the_meaning_check_is_the_default(self, tmp_path):
+    def test_automatic_is_the_default(self, tmp_path):
         cfg = TranslateConfig(input_path=str(tmp_path / "a_en.srt"), target_lang="ur")
-        assert (cfg.engine, cfg.meaning_check) == ("opus_mt", True)
+        assert cfg.engine == "auto"
+
+    def test_automatic_checks_the_pair_its_engine_translates(self, tmp_path):
+        # Japanese has no OPUS-MT model; Automatic picks MADLAD-400, which covers it.
+        TranslateConfig(input_path=str(tmp_path / "a_en.srt"), source_lang="en", target_lang="ja")
+
+    def test_unknown_profile_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown performance profile"):
+            TranslateConfig(input_path=str(tmp_path / "a_en.srt"), target_lang="ur", profile="turbo")
 
 
 class TestRun:
@@ -147,11 +155,14 @@ class TestRun:
         result = TranslateTask(TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es")).run()
         assert result.warnings == []
 
-    def test_meaning_check_can_be_turned_off(self, tmp_path, engine):
-        with patch("ccgen.core.tasks.translate.MeaningCheck") as meaning:
-            cfg = TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es", meaning_check=False)
-            assert TranslateTask(cfg).run().success
-        meaning.assert_not_called()
+    def test_meaning_check_always_runs(self, tmp_path, engine):
+        with patch("ccgen.core.tasks.translate.MeaningCheck", wraps=_FaithfulMeaning) as meaning:
+            assert TranslateTask(TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es")).run().success
+        meaning.assert_called_once()
+
+    def test_meaning_check_has_no_off_switch(self, tmp_path):
+        with pytest.raises(TypeError):
+            TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es", meaning_check=False)  # type: ignore[call-arg]
 
     def test_the_chosen_model_is_created(self, tmp_path):
         with (

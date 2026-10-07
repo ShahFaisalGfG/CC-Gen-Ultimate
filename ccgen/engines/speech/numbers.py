@@ -3,14 +3,14 @@
 # XTTS-v2 expands digits with num2words, which has no Hindi: a Hindi line like "भाग 2" raised
 # NotImplementedError and stopped the whole dub. Its Japanese reader leaves digits unread
 # ("2024" stays "2024" in the romanized text). Numbers in these languages are written out here
-# first: Hindustani words in Devanagari for Hindi and for Urdu read in Hindi script, and kanji
-# numerals for Japanese, which the Japanese reader pronounces ("二千二十四" -> "nisen nijuu yon").
+# first: Hindi words in Devanagari, and kanji numerals for Japanese, which the Japanese reader
+# pronounces ("二千二十四" -> "nisen nijuu yon").
 
 import re
 
 _DIGITS_RE = re.compile(r"\d+")
 
-# 1-99 have their own Hindustani words; Hindi and Urdu share them.
+# 1-99 each have their own Hindi word.
 _HINDUSTANI_1_99 = (
     "एक दो तीन चार पाँच छह सात आठ नौ दस "
     "ग्यारह बारह तेरह चौदह पंद्रह सोलह सत्रह अठारह उन्नीस बीस "
@@ -23,7 +23,7 @@ _HINDUSTANI_1_99 = (
     "इक्यासी बयासी तिरासी चौरासी पचासी छियासी सत्तासी अट्ठासी नवासी नब्बे "
     "इक्यानवे बानवे तिरानवे चौरानवे पचानवे छियानवे सत्तानवे अट्ठानवे निन्यानवे"
 ).split()
-_HINDUSTANI_ZERO = {"hi": "शून्य", "ur": "सिफ़र"}
+_HINDI_ZERO = "शून्य"
 # Indian numbering: crore (10^7), lakh (10^5), thousand, hundred.
 _HINDUSTANI_SCALES = ((10_000_000, "करोड़"), (100_000, "लाख"), (1000, "हज़ार"), (100, "सौ"))
 
@@ -34,15 +34,14 @@ _KANJI_LARGE = ((10**12, "兆"), (10**8, "億"), (10**4, "万"))
 
 def spells_numbers(language: str) -> bool:
     """True when digits in `language` are spelled out here instead of by XTTS-v2."""
-    return language in _HINDUSTANI_ZERO or language == "ja"
+    return language in ("hi", "ja")
 
 
 def spell_numbers(text: str, language: str) -> str:
-    """Replace each run of digits in `text` with its words in `language` (hi, ur, or ja)."""
+    """Replace each run of digits in `text` with its words in `language` (hi or ja)."""
     if language == "ja":
         return _DIGITS_RE.sub(lambda m: _kanji(int(m.group(0))), text)
-    zero = _HINDUSTANI_ZERO[language]
-    return _DIGITS_RE.sub(lambda m: _hindustani(int(m.group(0)), zero), text)
+    return _DIGITS_RE.sub(lambda m: _hindustani(int(m.group(0)), _HINDI_ZERO), text)
 
 
 def _hindustani(number: int, zero: str) -> str:

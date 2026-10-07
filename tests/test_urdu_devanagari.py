@@ -1,13 +1,7 @@
-# test_urdu_devanagari.py - Urdu -> Devanagari conversion and the XTTS-v2 Urdu script bridge
+# test_urdu_devanagari.py - Urdu -> Devanagari conversion for the Transliterate tab
 
-from types import SimpleNamespace
-
-import numpy as np
 import pytest
 
-from ccgen.config.voices import xtts_voice
-from ccgen.core.tasks.configs import DubConfig
-from ccgen.core.tasks.dub import dub_settings
 from ccgen.engines.transliteration.rule_engine import RuleEngine
 from ccgen.engines.transliteration.urdu_devanagari import urdu_to_devanagari
 
@@ -55,29 +49,3 @@ class TestRuleEngineUrdu:
         bengali = self._convert("bn", "میرا نام")
         assert bengali and not _has_arabic_letters(bengali)
         assert all("ঀ" <= ch <= "৿" or ch == " " for ch in bengali)
-
-
-class TestXttsScriptBridge:
-    def test_dub_settings_carry_the_choice(self, tmp_path):
-        cfg = DubConfig(input_path=str(tmp_path / "a.mp4"), subtitle_path=str(tmp_path / "a_ur.srt"), script_bridge=False)
-        assert dub_settings(cfg).script_bridge is False
-
-    def test_bridged_voice_speaks_urdu_lines_in_hindi_script(self, monkeypatch):
-        from ccgen.engines.speech import xtts_engine
-
-        spoken = []
-
-        class FakeModel:
-            tokenizer = SimpleNamespace(char_limits={"hi": 150})
-            config = SimpleNamespace(audio=SimpleNamespace(output_sample_rate=24000))
-
-            def inference(self, text, language, latent, embedding, speed=1.0):
-                spoken.append((text, language))
-                return {"wav": np.zeros(10, np.float32), "gpt_latents": np.zeros((1, 2, 4), np.float32)}
-
-        monkeypatch.setattr(xtts_engine._models, "get_or_load", lambda key, loader: (FakeModel(), "CPU"))
-        engine = xtts_engine.XttsEngine(xtts_voice("ur"), "cpu")
-        engine.load()
-        engine._speakers = {0: (None, None)}
-        engine.synthesize("یہ ایک کورس ہے")
-        assert spoken == [("ये एक कोर्स है", "hi")]

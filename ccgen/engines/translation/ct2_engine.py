@@ -61,11 +61,14 @@ class Ct2Engine(TranslationEngine):
         source_lang: str,
         target_lang: str,
         meaning: Optional[MeaningCheck] = None,
+        for_speech: bool = False,
     ) -> None:
         self._engine = engine
         self._source_lang = source_lang
         self._target_lang = target_lang
         self._meaning = meaning
+        # The translation will be dubbed: prefer candidates that take as long to say as the original.
+        self._for_speech = for_speech
         self._legs: list[tuple[str, str]] = []
         self._loaded: dict[str, _Loaded] = {}
 
@@ -134,7 +137,9 @@ class Ct2Engine(TranslationEngine):
             if rerank:
                 assert self._meaning is not None
                 originals = [texts[i] for i in filled]
-                current = [best for best, _ in self._meaning.choose(originals, candidates, self._target_lang)]
+                spoken_from = self._source_lang if self._for_speech else None
+                chosen = self._meaning.choose(originals, candidates, self._target_lang, spoken_from)
+                current = [best for best, _ in chosen]
             else:
                 current = [options[0] for options in candidates]
         out = [""] * len(texts)

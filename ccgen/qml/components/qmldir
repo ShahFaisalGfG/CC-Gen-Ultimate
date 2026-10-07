@@ -1,5 +1,6 @@
 singleton Theme 1.0 Theme.qml
 AppButton 1.0 AppButton.qml
+AppDialog 1.0 AppDialog.qml
 AppSwitch 1.0 AppSwitch.qml
 AppWindow 1.0 AppWindow.qml
 Card 1.0 Card.qml
@@ -18,3 +19,4 @@ StyledComboBox 1.0 StyledComboBox.qml
 TitleBar 1.0 TitleBar.qml
 Toast 1.0 Toast.qml
 ModelTermsDialog 1.0 ModelTermsDialog.qml
+LicenceBanner 1.0 LicenceBanner.qml

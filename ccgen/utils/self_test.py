@@ -40,14 +40,25 @@ def _check_lazy_modules() -> None:
     from argostranslate.sbd import MiniSBDSentencizer, StanzaSentencizer  # noqa: F401
     from sacremoses.tokenize import MosesDetokenizer, MosesTokenizer  # noqa: F401
     from ctranslate2.converters import TransformersConverter  # noqa: F401 - prepares OPUS-MT models
+    from llama_cpp import llama_print_system_info  # Hy-MT2 translation; loads llama.cpp's DLLs
     from tokenizers import Tokenizer  # noqa: F401 - the meaning check's tokenizer
     from transformers import MarianMTModel  # noqa: F401 - loaded by name when converting OPUS-MT
     from transformers.models.auto.tokenization_auto import tokenizer_class_from_name
 
-    # Transliteration (M2M100), OPUS-MT (Marian), and NLLB tokenizers are resolved by name.
-    for name in ("M2M100Tokenizer", "MarianTokenizer", "NllbTokenizerFast"):
+    if not llama_print_system_info():
+        raise RuntimeError("llama.cpp reported no system information")
+    # Transliteration (M2M100), OPUS-MT (Marian), NLLB, and OmniVoice (Qwen2) tokenizers are
+    # resolved by name.
+    for name in ("M2M100Tokenizer", "MarianTokenizer", "NllbTokenizerFast", "Qwen2TokenizerFast"):
         if tokenizer_class_from_name(name) is None:
             raise RuntimeError(f"transformers could not resolve {name}")
+    # OmniVoice builds its backbone (Qwen3) and audio codec (DAC, HuBERT) from config by name,
+    # and tells speakers apart with WavLM.
+    from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+    from transformers.models.auto.modeling_auto import MODEL_MAPPING
+
+    for model_type in ("qwen3", "dac", "hubert", "wavlm"):
+        MODEL_MAPPING[CONFIG_MAPPING[model_type]]  # raises when the model class wasn't bundled
 
 
 def _check_native_libraries() -> None:
@@ -99,6 +110,9 @@ def _check_speech_engines() -> None:
     from TTS.tts.models.xtts import Xtts  # noqa: F401
 
     from ccgen.engines.devices import describe_accelerators
+    from ccgen.engines.hardware import detect
+    from ccgen.engines.speech.omnivoice.audio import remove_silence
+    from ccgen.engines.speech.omnivoice.model import OmniVoice  # noqa: F401
 
     if not EspeakPhonemizer().phonemize("en-us", "hello"):
         raise RuntimeError("Piper's eSpeak returned no phonemes")
@@ -108,8 +122,13 @@ def _check_speech_engines() -> None:
         raise RuntimeError("Japanese romanization returned nothing")
     if not pypinyin.lazy_pinyin("你好"):
         raise RuntimeError("Chinese pinyin returned nothing")
+    tone = (0.3 * np.sin(np.arange(16000) * 0.05)).astype(np.float32)[None, :]
+    if remove_silence(tone, 16000).shape[-1] == 0:
+        raise RuntimeError("OmniVoice's silence trimming removed speech")
     for runtime, devices in describe_accelerators().items():
         print(f"    {runtime}: {', '.join(devices)}")
+    hardware = detect()
+    print(f"    hardware: {hardware.summary} ({hardware.recommended} profile)")
 
 
 def _check_api_server() -> None:

@@ -18,12 +18,11 @@ class TestHindustani:
     def test_numbers(self, number, words):
         assert spell_numbers(number, "hi") == words
 
-    def test_zero_follows_the_language(self):
+    def test_zero(self):
         assert spell_numbers("0", "hi") == "शून्य"
-        assert spell_numbers("0", "ur") == "सिफ़र"
 
     def test_numbers_inside_text(self):
-        assert spell_numbers("ML Ops 0 से हीरो, भाग 2", "ur") == "ML Ops सिफ़र से हीरो, भाग दो"
+        assert spell_numbers("ML Ops 0 से हीरो, भाग 2", "hi") == "ML Ops शून्य से हीरो, भाग दो"
 
 
 class TestKanji:
@@ -37,8 +36,8 @@ class TestKanji:
 
 class TestXttsCleaners:
     def test_only_languages_xtts_cannot_expand_are_spelled_here(self):
-        assert spells_numbers("hi") and spells_numbers("ur") and spells_numbers("ja")
-        assert not spells_numbers("en") and not spells_numbers("zh-cn")
+        assert spells_numbers("hi") and spells_numbers("ja")
+        assert not spells_numbers("en") and not spells_numbers("zh-cn") and not spells_numbers("ur")
 
     def test_spelled_hindi_passes_xtts_text_cleaning(self):
         from TTS.tts.layers.xtts.tokenizer import multilingual_cleaners

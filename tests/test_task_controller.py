@@ -274,9 +274,9 @@ class TestTranslateTab:
 
 
 def _dub():
-    """A Dub tab whose user already accepted the voice cloning licence."""
+    """A Dub tab whose user already accepted the voice cloning licences."""
     ctrl = _make(DubController)
-    ctrl._saved_settings = {"dubbing": {"xtts_terms_accepted": True}}
+    ctrl._saved_settings = {"dubbing": {"omnivoice_terms_accepted": True, "xtts_terms_accepted": True}}
     return ctrl
 
 
@@ -285,9 +285,30 @@ class TestDubTab:
         ctrl = _make(DubController)
         (tmp_path / "movie_es.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "movie_es.srt")])
+        # Automatic resolves to OmniVoice, whose licence comes first.
+        assert "OmniVoice licence" in ctrl.blocker
+        ctrl.setOption("mode", "xtts")
         assert "XTTS-v2 licence" in ctrl.blocker
         ctrl.setOption("mode", "piper")
         assert ctrl.blocker == ""
+
+    def test_jobs_carry_the_saved_profile(self, tmp_path):
+        ctrl = _dub()
+        ctrl._saved_settings["performance"] = {"profile": "balanced"}
+        (tmp_path / "talk_es.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "talk_es.srt")])
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["profile"] == "balanced"
+
+    def test_custom_profile_jobs_carry_the_recommended_profile_and_quality(self, tmp_path):
+        ctrl = _dub()
+        ctrl._saved_settings["performance"] = {"profile": "custom", "recommended": "balanced"}
+        ctrl.setOption("quality", "full")
+        (tmp_path / "talk_es.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "talk_es.srt")])
+        ctrl.startQueue()
+        job = ctrl._api.jobs()[0]
+        assert job["profile"] == "balanced" and job["quality"] == "full"
 
     def test_subtitle_pairs_with_its_media(self, tmp_path):
         ctrl = _dub()
@@ -299,15 +320,6 @@ class TestDubTab:
         body = ctrl._api.jobs()[0]
         assert body["subtitle_path"] == str(tmp_path / "movie_es.srt")
         assert body["language"] == "es"
-
-    def test_urdu_script_bridge_follows_preferences_into_the_job(self, tmp_path):
-        ctrl = _dub()
-        assert ctrl.options["script_bridge"] is True
-        ctrl._apply_defaults({"dubbing": {"script_bridge": False}})
-        (tmp_path / "talk_ur.srt").write_text("")
-        ctrl.addFiles([str(tmp_path / "talk_ur.srt")])
-        ctrl.startQueue()
-        assert ctrl._api.jobs()[0]["script_bridge"] is False
 
     def test_lone_subtitle_becomes_a_wav(self, tmp_path):
         ctrl = _dub()

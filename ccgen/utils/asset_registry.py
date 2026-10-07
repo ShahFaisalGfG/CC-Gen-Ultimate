@@ -12,8 +12,16 @@ from huggingface_hub import scan_cache_dir
 
 from ccgen.config.capabilities import PIVOT_LANGUAGE as _PIVOT_LANG
 from ccgen.config.defaults import LanguageOptions, ModelDefaults, ModelRepos
-from ccgen.config.translation_models import CT2_MODELS, MEANING_MODEL, engine_info
-from ccgen.config.voices import ENGINE_KOKORO, ENGINE_PIPER, ENGINE_XTTS, VOICES, VoiceOption, voice_by_key
+from ccgen.config.translation_models import CT2_MODELS, ENGINE_HYMT, HYMT_MODEL, MEANING_MODEL, engine_info
+from ccgen.config.voices import (
+    ENGINE_KOKORO,
+    ENGINE_OMNIVOICE,
+    ENGINE_PIPER,
+    ENGINE_XTTS,
+    VOICES,
+    VoiceOption,
+    voice_by_key,
+)
 from ccgen.engines.transliteration.neural_engine import NeuralEngine
 from ccgen.engines.transliteration.rekhta_backend import RekhtaBackend
 from ccgen.engines.speech import voice_files
@@ -37,6 +45,7 @@ ENGINE_ARGOS_TRANSLATE = "Argos Translate"
 ENGINE_MEANING_CHECK = "Meaning check"
 ENGINE_NEURAL_M2M100 = "Neural (M2M100)"
 ENGINE_NEURAL_REKHTA = "Neural (Rekhta)"
+ENGINE_OMNIVOICE_LABEL = "OmniVoice (voice cloning)"
 ENGINE_XTTS_LABEL = "XTTS-v2 (voice cloning)"
 ENGINE_KOKORO_LABEL = "Kokoro"
 ENGINE_PIPER_LABEL = "Piper"
@@ -101,6 +110,8 @@ def download_asset(
                 translation_files.ensure_model(CT2_MODELS[key], progress_cb, progress_num_cb)
             elif category == CATEGORY_TRANSLATION and key == MEANING_MODEL.key:
                 translation_files.ensure_meaning_model(progress_cb, progress_num_cb)
+            elif category == CATEGORY_TRANSLATION and key == HYMT_MODEL.key:
+                translation_files.ensure_gguf(HYMT_MODEL, progress_cb, progress_num_cb)
             elif category == CATEGORY_TRANSLATION:
                 install_pair(*_translation_pair(key), progress_num_cb, progress_cb)
             elif category == CATEGORY_TRANSLITERATION:
@@ -122,7 +133,7 @@ def delete_asset(asset_id: str) -> None:
         category, key = _split_id(asset_id)
         if category == CATEGORY_WHISPER:
             _delete_hf_repo(ModelRepos.WHISPER[key])
-        elif category == CATEGORY_TRANSLATION and (key in CT2_MODELS or key == MEANING_MODEL.key):
+        elif category == CATEGORY_TRANSLATION and (key in CT2_MODELS or key in (MEANING_MODEL.key, HYMT_MODEL.key)):
             translation_files.remove_model(key)
         elif category == CATEGORY_TRANSLATION:
             _delete_translation_pair(*_translation_pair(key))
@@ -155,7 +166,7 @@ def _whisper_assets(cache_info: Optional[Any]) -> list[AssetInfo]:
 
 
 def _translation_assets() -> list[AssetInfo]:
-    """Build the Translation category rows: CTranslate2 models first, then Argos packages."""
+    """Build the Translation category rows: CTranslate2 models, Hy-MT2, the meaning check, then Argos."""
     assets: list[AssetInfo] = []
     for model in CT2_MODELS.values():
         downloaded = translation_files.is_ready(model.key, model.revision)
@@ -168,6 +179,16 @@ def _translation_assets() -> list[AssetInfo]:
             size_bytes=translation_files.folder_size(model.key) if downloaded else None,
             approx_size_mb=model.download_mb,
         ))
+    hymt_ready = translation_files.is_ready(HYMT_MODEL.key, HYMT_MODEL.revision)
+    assets.append(AssetInfo(
+        id=f"{CATEGORY_TRANSLATION}:{HYMT_MODEL.key}",
+        category=CATEGORY_TRANSLATION,
+        engine=engine_info(ENGINE_HYMT).label,
+        label=HYMT_MODEL.label,
+        downloaded=hymt_ready,
+        size_bytes=translation_files.folder_size(HYMT_MODEL.key) if hymt_ready else None,
+        approx_size_mb=HYMT_MODEL.download_mb,
+    ))
     meaning_ready = translation_files.is_ready(MEANING_MODEL.key, MEANING_MODEL.revision)
     assets.append(AssetInfo(
         id=f"{CATEGORY_TRANSLATION}:{MEANING_MODEL.key}",
@@ -237,11 +258,25 @@ def _transliteration_assets(cache_info: Optional[Any]) -> list[AssetInfo]:
 
 
 def _voice_assets(cache_info: Optional[Any]) -> list[AssetInfo]:
-    """Build the Voices category rows: the XTTS checkpoint, Kokoro's model, and each Piper voice."""
+    """Build the Voices category rows: the OmniVoice and XTTS checkpoints, Kokoro's model, and each
+    Piper voice."""
+    omnivoice_downloaded = voice_files.engine_files_cached(ENGINE_OMNIVOICE)
     xtts_downloaded = voice_files.engine_files_cached(ENGINE_XTTS)
     kokoro_downloaded = voice_files.engine_files_cached(ENGINE_KOKORO)
     kokoro_dir = os.path.dirname(voice_files.kokoro_paths()[0])
+    omnivoice_bytes = ModelRepos.OMNIVOICE_SIZE_BYTES + ModelRepos.SPEAKER_VECTORS_SIZE_BYTES
     assets = [
+        AssetInfo(
+            id=f"{CATEGORY_VOICES}:{ENGINE_OMNIVOICE}",
+            category=CATEGORY_VOICES,
+            engine=ENGINE_OMNIVOICE_LABEL,
+            label="Voice cloning model for every language, with its speaker detector",
+            downloaded=omnivoice_downloaded,
+            size_bytes=sum(
+                _hf_repo_size(repo, cache_info) or 0 for repo in (ModelRepos.OMNIVOICE, ModelRepos.SPEAKER_VECTORS)
+            ) if omnivoice_downloaded else None,
+            approx_size_mb=round(omnivoice_bytes / 1_000_000),
+        ),
         AssetInfo(
             id=f"{CATEGORY_VOICES}:{ENGINE_XTTS}",
             category=CATEGORY_VOICES,
@@ -278,8 +313,11 @@ def _voice_assets(cache_info: Optional[Any]) -> list[AssetInfo]:
 
 
 def _download_voice(key: str, progress_num_cb: Optional[Callable[[int, int], None]]) -> None:
-    """Download the XTTS checkpoint, Kokoro's model, or one Piper voice."""
-    if key == ENGINE_XTTS:
+    """Download the OmniVoice or XTTS checkpoint, Kokoro's model, or one Piper voice."""
+    if key == ENGINE_OMNIVOICE:
+        voice_files.ensure_omnivoice(progress_num_cb)
+        voice_files.ensure_speaker_vectors(progress_num_cb)
+    elif key == ENGINE_XTTS:
         voice_files.ensure_xtts(progress_num_cb)
     elif key == ENGINE_KOKORO:
         voice_files.ensure_kokoro(progress_num_cb)
@@ -288,8 +326,11 @@ def _download_voice(key: str, progress_num_cb: Optional[Callable[[int, int], Non
 
 
 def _delete_voice(key: str) -> None:
-    """Remove the XTTS checkpoint, Kokoro's model, or one Piper voice."""
-    if key == ENGINE_XTTS:
+    """Remove the OmniVoice or XTTS checkpoint, Kokoro's model, or one Piper voice."""
+    if key == ENGINE_OMNIVOICE:
+        _delete_hf_repo(ModelRepos.OMNIVOICE)
+        _delete_hf_repo(ModelRepos.SPEAKER_VECTORS)
+    elif key == ENGINE_XTTS:
         _delete_hf_repo(ModelRepos.XTTS)
     elif key == ENGINE_KOKORO:
         voice_files.remove_engine_files(ENGINE_KOKORO)

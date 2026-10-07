@@ -132,6 +132,16 @@ AppWindow {
         }
     }
 
+    // The detected hardware chose or changed the performance profile.
+    Connections {
+        target: performanceController
+        function onNotice(message) { toast.show(message) }
+        function onSettingsSaved() {
+            prefsController.loadSettings()
+            for (var i = 0; i < mainWin.tasks.length; i++) mainWin.tasks[i].controller.reloadDefaults()
+        }
+    }
+
     // ── Layout ─────────────────────────────────────────────────────────────
 
     ColumnLayout {
@@ -333,12 +343,10 @@ AppWindow {
 
     // ── About ──────────────────────────────────────────────────────────────
 
-    Dialog {
+    AppDialog {
         id: aboutDialog
         title: "About " + appController.appName
-        modal: true
         standardButtons: Dialog.Close
-        anchors.centerIn: parent
         width: Math.min(480, mainWin.width - 48)
 
         ColumnLayout {

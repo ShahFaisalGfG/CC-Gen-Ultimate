@@ -95,6 +95,27 @@ class TestParseSrt:
             parse_subtitle(str(tmp_path / "missing.srt"))
 
 
+class TestMarkup:
+    def test_srt_styling_tags_are_removed(self, tmp_path):
+        content = "1\n00:00:00,000 --> 00:00:02,000\n{\\an8}<i>Hello</i> <font color=\"#ff0\">world</font>.\n"
+        assert parse_subtitle(_write(tmp_path, "a.srt", content))[0]["text"] == "Hello world."
+
+    def test_vtt_voice_class_and_timestamp_tags_are_removed(self, tmp_path):
+        content = (
+            "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\n"
+            "<v Roger>Rock <00:00:01.000><c.loud>&amp; roll</c>\n"
+        )
+        assert parse_subtitle(_write(tmp_path, "a.vtt", content))[0]["text"] == "Rock & roll"
+
+    def test_plain_angle_brackets_and_braces_stay(self, tmp_path):
+        content = "1\n00:00:00,000 --> 00:00:02,000\n3 < 5 and {braces} stay\n"
+        assert parse_subtitle(_write(tmp_path, "a.srt", content))[0]["text"] == "3 < 5 and {braces} stay"
+
+    def test_cue_with_only_markup_is_skipped(self, tmp_path):
+        content = "1\n00:00:00,000 --> 00:00:02,000\n<i></i>\n\n2\n00:00:03,000 --> 00:00:04,000\nHi\n"
+        assert [s["text"] for s in parse_subtitle(_write(tmp_path, "a.srt", content))] == ["Hi"]
+
+
 class TestParseVtt:
     def test_parses_all_cues(self, tmp_path):
         path = _write(tmp_path, "sample.vtt", VTT_CONTENT)

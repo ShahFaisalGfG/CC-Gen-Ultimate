@@ -3,39 +3,19 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// One-time licence notice for a model whose licence allows non-commercial use only: XTTS-v2
-// voice cloning (Coqui Public Model License) or the NLLB-200 translation model (CC-BY-NC-4.0).
+// One-time licence notice for a model whose licence allows non-commercial use only (OmniVoice
+// and XTTS-v2 voice cloning, NLLB-200 translation). The text comes from ccgen/config/licences.py.
 // Accepting is saved in preferences; `accepted()` lets the caller continue what it started.
-Dialog {
+AppDialog {
     id: dialog
 
-    // Which model's licence to show: "xtts" or "nllb".
-    property string model: "xtts"
-    readonly property var terms: dialog.model === "nllb" ? ({
-        title: "NLLB-200 licence",
-        body: "The NLLB-200 translation model by Meta is released under the Creative Commons "
-            + "Attribution-NonCommercial 4.0 licence. It allows personal, research, and other "
-            + "non-commercial use of the model. Commercial use isn't allowed.",
-        note: "OPUS-MT, MADLAD-400, and Argos Translate have no such limits.",
-        url: "https://creativecommons.org/licenses/by-nc/4.0/",
-        site: "creativecommons.org",
-        setting: "translation.nllb_terms_accepted"
-    }) : ({
-        title: "XTTS-v2 licence",
-        body: "Voice cloning uses the XTTS-v2 model by Coqui, released under the Coqui Public Model "
-            + "License. It allows personal, research, and other non-commercial use of the model and "
-            + "of the audio it creates. Commercial use needs a separate licence.",
-        note: "Only clone voices you have permission to use. Kokoro and Piper voices have no such limits.",
-        url: "https://coqui.ai/cpml",
-        site: "coqui.ai/cpml",
-        setting: "dubbing.xtts_terms_accepted"
-    })
+    // Which model's licence to show: "omnivoice", "xtts", or "nllb".
+    property string model: "omnivoice"
+    readonly property var terms: prefsController.modelTerms(dialog.model)
 
     signal accepted()
 
     title: dialog.terms.title
-    modal: true
-    anchors.centerIn: parent
     width: Math.min(520, parent ? parent.width - 48 : 520)
     standardButtons: Dialog.Cancel
 

@@ -11,17 +11,20 @@ ColumnLayout {
     property var options: ({})
     signal optionChanged(string key, var value)
 
-    readonly property bool cloning: root.options.mode === "xtts"
-    readonly property bool termsAccepted: !!(prefsController.settings.dubbing && prefsController.settings.dubbing.xtts_terms_accepted)
-    readonly property var modeInfo: prefsController.dubModeOptions.find(m => m.code === root.options.mode) || ({ hint: "" })
-    readonly property var voiceList: dubController.voiceOptions(root.options.mode || "", root.options.language || "auto")
+    readonly property string mode: root.options.mode || "auto"
+    // The engine the mode runs with on this PC's profile (Automatic resolves to one).
+    readonly property string resolvedMode: prefsController.resolvedDubMode(root.mode, prefsController.settings)
+    readonly property bool cloning: root.resolvedMode === "omnivoice" || root.resolvedMode === "xtts"
+    readonly property var modeInfo: prefsController.dubModeOptions.find(m => m.code === root.mode) || ({ hint: "" })
+    readonly property string automatic: prefsController.automaticChoice("dub", root.options, prefsController.settings)
+    readonly property var voiceList: dubController.voiceOptions(root.mode, root.options.language || "auto")
 
     spacing: Theme.spaceLg
 
     function voiceReadiness(readiness) {
         var result = {}
         for (var i = 0; i < root.voiceList.length; i++) {
-            var id = modelsController.voiceAssetId(root.options.mode, root.voiceList[i].code)
+            var id = modelsController.voiceAssetId(root.mode, root.voiceList[i].code, prefsController.profile)
             if (id && readiness[id] !== undefined) result[root.voiceList[i].code] = readiness[id]
         }
         return result
@@ -29,17 +32,12 @@ ColumnLayout {
 
     function modeReadiness(readiness) {
         var result = {}
-        var modes = ["xtts", "kokoro"]
+        var modes = ["auto", "omnivoice", "xtts", "kokoro"]
         for (var i = 0; i < modes.length; i++) {
-            var ready = readiness[modelsController.voiceAssetId(modes[i], "")]
+            var ready = readiness[modelsController.voiceAssetId(modes[i], "", prefsController.profile)]
             if (ready !== undefined) result[modes[i]] = ready
         }
         return result
-    }
-
-    ModelTermsDialog {
-        id: termsDialog
-        parent: Overlay.overlay
     }
 
     Card {
@@ -55,7 +53,7 @@ ColumnLayout {
                 accessibleName: "Dubbing voices"
                 toolTipText: "Clone each original speaker, or use natural or light stock voices."
                 model: prefsController.dubModeOptions
-                value: root.options.mode
+                value: root.mode
                 readiness: root.modeReadiness(modelsController.readiness)
                 onActivated: root.optionChanged("mode", currentValue)
             }
@@ -65,39 +63,15 @@ ColumnLayout {
         // the label column.
         Text {
             Layout.fillWidth: true
-            text: root.modeInfo.hint
+            text: root.modeInfo.hint + (root.automatic ? " On this PC: " + root.automatic + "." : "")
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
             color: Theme.textMuted
             wrapMode: Text.WordWrap
         }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: termsRow.implicitHeight + 2 * Theme.spaceMd
-            visible: root.cloning && !root.termsAccepted
-            radius: Theme.radius
-            color: Theme.accentSoft
-
-            RowLayout {
-                id: termsRow
-                anchors.fill: parent
-                anchors.margins: Theme.spaceMd
-                spacing: Theme.spaceMd
-                Text {
-                    Layout.fillWidth: true
-                    text: "Voice cloning's licence allows non-commercial use only. Review and accept it once to continue."
-                    wrapMode: Text.WordWrap
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontCaption
-                    color: Theme.text
-                }
-                AppButton {
-                    text: "Review licence"
-                    toolTipText: "Read the XTTS-v2 licence terms and accept them"
-                    onClicked: termsDialog.open()
-                }
-            }
+        LicenceBanner {
+            model: prefsController.pendingLicence("dub", root.options, prefsController.settings)
         }
 
         FormRow {
@@ -112,20 +86,6 @@ ColumnLayout {
                 value: root.options.language
                 onActivated: root.optionChanged("language", currentValue)
             }
-        }
-
-        FormRow {
-            label: "Urdu in Hindi script"
-            visible: root.cloning && (root.options.language === "ur" || root.options.language === "auto")
-            hint: "Voice cloning can't speak Urdu directly. On, it reads Urdu lines in Hindi script with "
-                + "the cloned voices; a few words may sound Hindi-accented. Off, Urdu uses a Piper voice."
-            AppSwitch {
-                checked: !!root.options.script_bridge
-                onToggled: root.optionChanged("script_bridge", checked)
-                accessibleName: "Read Urdu in Hindi script"
-                toolTipText: "Keep the cloned voices for Urdu by reading the lines in Hindi script."
-            }
-            Item { Layout.fillWidth: true }
         }
 
         FormRow {
@@ -159,7 +119,7 @@ ColumnLayout {
 
         FormRow {
             label: "Fastest speech"
-            hint: "Lines that don't fit their time are spoken faster up to this speed, then cut short."
+            hint: "Lines that don't fit their time are spoken faster up to this speed, then may run up to a second over; only longer ones are cut short."
             SpinBox {
                 from: Math.round(prefsController.speedupRange[0] * 100)
                 to: Math.round(prefsController.speedupRange[1] * 100)
@@ -211,7 +171,7 @@ ColumnLayout {
 
         FormRow {
             label: "Run on"
-            hint: "Automatic times Kokoro and Piper on each GPU and the CPU and keeps the fastest. Voice cloning uses the first GPU that works, or the CPU."
+            hint: "Automatic times Kokoro and Piper on each GPU and the CPU and keeps the fastest. OmniVoice and XTTS-v2 use the first GPU that works, or the CPU."
             StyledComboBox {
                 Layout.fillWidth: true
                 accessibleName: "Dubbing device"

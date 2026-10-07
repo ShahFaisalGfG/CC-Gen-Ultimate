@@ -20,8 +20,7 @@ class TestGetDefaultSettings:
 
     def test_model_section_matches_settings_service_usage(self):
         settings = get_default_settings()
-        assert settings["model"]["name"] == ModelDefaults.DEFAULT_MODEL
-        assert settings["model"]["name"] in ModelDefaults.SUPPORTED_MODELS
+        assert settings["model"]["name"] == ModelDefaults.DEFAULT_MODEL == "auto"
 
     def test_transliteration_section_keys_used_by_settings_service(self):
         settings = get_default_settings()
@@ -31,9 +30,19 @@ class TestGetDefaultSettings:
     def test_translation_section_has_no_stage_switch(self):
         translation = get_default_settings()["translation"]
         assert set(translation.keys()) == {
-            "source_lang", "target_lang", "engine", "meaning_check", "nllb_terms_accepted",
+            "source_lang", "target_lang", "engine", "nllb_terms_accepted",
         }
-        assert (translation["engine"], translation["meaning_check"]) == ("opus_mt", True)
+        assert translation["engine"] == "auto"
+
+    def test_performance_section_starts_undetected(self):
+        performance = get_default_settings()["performance"]
+        assert performance == {"profile": "", "recommended": "", "hardware": "", "hardware_id": ""}
+
+    def test_model_choices_default_to_automatic(self):
+        settings = get_default_settings()
+        assert settings["transliteration"]["engine"] == "auto"
+        assert settings["dubbing"]["mode"] == "auto"
+        assert settings["dubbing"]["omnivoice_terms_accepted"] is False
 
     def test_output_section_keys_used_by_settings_service(self):
         settings = get_default_settings()
@@ -47,8 +56,8 @@ class TestModelDefaults:
     def test_supported_models_non_empty(self):
         assert len(ModelDefaults.SUPPORTED_MODELS) > 0
 
-    def test_default_model_in_supported_list(self):
-        assert ModelDefaults.DEFAULT_MODEL in ModelDefaults.SUPPORTED_MODELS
+    def test_default_model_is_automatic(self):
+        assert ModelDefaults.DEFAULT_MODEL == "auto" and "auto" not in ModelDefaults.SUPPORTED_MODELS
 
     def test_every_supported_model_has_a_size(self):
         for model in ModelDefaults.SUPPORTED_MODELS:

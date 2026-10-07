@@ -98,7 +98,7 @@ class TestRun:
         result = task.run()
         assert result.success, result.error
         call = engines["translation"].call_args
-        assert call.args == ("opus_mt",)
+        assert (call.args, call.kwargs["profile"], call.kwargs["for_speech"]) == (("auto",), "", False)
         assert (call.kwargs["source_lang"], call.kwargs["target_lang"]) == ("en", "es")
         assert result.output_files == [str(tmp_path / "movie.srt"), str(tmp_path / "movie_es.srt")]
         assert result.detected_language == "en"
@@ -127,6 +127,8 @@ class TestRun:
         assert result.output_files == [str(tmp_path / "movie_dub_es.mkv")]
         assert task.stages == ["load", "transcribe", "translate", "load", "speakers", "speak", "write"]
         assert result.output_languages == {str(tmp_path / "movie_dub_es.mkv"): "es"}
+        # The translation feeds the dub, so it is chosen to take about as long to say.
+        assert engines["translation"].call_args.kwargs["for_speech"] is True
 
     def test_subtitle_source_feeds_text_steps(self, tmp_path, engines):
         sub = tmp_path / "talk_en.srt"

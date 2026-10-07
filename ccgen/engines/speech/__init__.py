@@ -1,14 +1,22 @@
 # speech - text-to-speech engines used for dubbing
 #
-# Engines are imported only when created: each pulls in a heavy runtime (PyTorch for XTTS,
-# ONNX Runtime and eSpeak for Piper and Kokoro), and most runs need just one of them.
+# Engines are imported only when created: each pulls in a heavy runtime (PyTorch for OmniVoice
+# and XTTS, ONNX Runtime and eSpeak for Piper and Kokoro), and most runs need just one of them.
 
-from ccgen.config.voices import ENGINE_KOKORO, ENGINE_PIPER, ENGINE_XTTS, VoiceOption
+from ccgen.config.voices import ENGINE_KOKORO, ENGINE_OMNIVOICE, ENGINE_PIPER, ENGINE_XTTS, VoiceOption
 from ccgen.engines.speech.base import CloningEngine, SpeechEngine
 
 
-def create_engine(voice: VoiceOption, device: str) -> SpeechEngine:
-    """Instantiate the speech engine that speaks with `voice` on the preferred `device`."""
+def create_engine(voice: VoiceOption, device: str, fast: bool = False) -> SpeechEngine:
+    """Instantiate the speech engine that speaks with `voice` on the preferred `device`.
+
+    `fast` trades a little quality for speed where an engine offers that (OmniVoice runs fewer
+    denoising steps).
+    """
+    if voice.engine == ENGINE_OMNIVOICE:
+        from ccgen.engines.speech.omnivoice_engine import FAST_STEPS, QUALITY_STEPS, OmniVoiceEngine
+
+        return OmniVoiceEngine(voice, device, FAST_STEPS if fast else QUALITY_STEPS)
     if voice.engine == ENGINE_XTTS:
         from ccgen.engines.speech.xtts_engine import XttsEngine
 

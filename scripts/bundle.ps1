@@ -74,6 +74,8 @@ function Get-PyInstallerArgs {
         # PyInstaller only traces Python imports, so these need to be listed explicitly.
         "--collect-data", "indic_transliteration",
         "--collect-data", "faster_whisper",
+        # Hy-MT2 translation: llama.cpp's DLLs, which llama_cpp loads by path.
+        "--collect-all",  "llama_cpp",
         # Dubbing: Piper's and Kokoro's eSpeak libraries and phoneme data, and the dictionaries
         # XTTS reads Japanese, Chinese, and Korean text with (hooks\hook-TTS.py collects XTTS).
         "--collect-all",  "piper",

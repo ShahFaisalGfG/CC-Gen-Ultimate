@@ -11,6 +11,9 @@ ColumnLayout {
     signal optionChanged(string key, var value)
 
     readonly property string neuralAsset: modelsController.neuralAssetId(root.options.source_scheme || "", root.options.target_scheme || "")
+    // What Automatic runs on this PC's profile ("" for an engine chosen by hand).
+    readonly property string automatic: prefsController.automaticChoice("transliterate", root.options, prefsController.settings)
+    readonly property string resolvedEngine: prefsController.resolvedTranslitEngine(root.options, prefsController.settings)
 
     spacing: Theme.spaceLg
 
@@ -43,7 +46,8 @@ ColumnLayout {
 
         FormRow {
             label: "Engine"
-            hint: root.options.engine === "neural" && root.neuralAsset.length === 0
+            hint: root.automatic ? "On this PC: " + root.automatic + ", from the performance profile."
+                : root.options.engine === "neural" && root.neuralAsset.length === 0
                 ? "Neural supports Urdu and Roman Urdu both ways, and Hindi or Punjabi to Urdu."
                 : "Neural is more natural but downloads a model on first use."
             StyledComboBox {
@@ -56,6 +60,7 @@ ColumnLayout {
                     var result = {}
                     var ready = modelsController.readiness[root.neuralAsset]
                     if (root.neuralAsset && ready !== undefined) result["neural"] = ready
+                    if (root.automatic && root.resolvedEngine === "neural" && ready !== undefined) result["auto"] = ready
                     return result
                 }
                 onActivated: root.optionChanged("engine", currentValue)

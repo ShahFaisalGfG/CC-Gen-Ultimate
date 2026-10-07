@@ -17,7 +17,7 @@ Rectangle {
     implicitWidth: Math.min(row.implicitWidth + 2 * Theme.spaceLg, 560)
     implicitHeight: row.implicitHeight + 2 * Theme.spaceMd
     radius: Theme.radiusLarge
-    color: Theme.dark ? "#e8eaee" : "#22262e"
+    color: Theme.inverseSurface
     opacity: 0
     visible: opacity > 0
 
@@ -40,7 +40,7 @@ Rectangle {
         Icon {
             name: "info"
             size: 14
-            color: Theme.dark ? "#1a1d23" : "#ffffff"
+            color: Theme.inverseText
         }
         Text {
             id: label
@@ -48,7 +48,7 @@ Rectangle {
             Layout.maximumWidth: 500
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
-            color: Theme.dark ? "#1a1d23" : "#ffffff"
+            color: Theme.inverseText
             wrapMode: Text.WordWrap
             Accessible.role: Accessible.StaticText
             Accessible.name: label.text

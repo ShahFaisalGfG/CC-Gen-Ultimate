@@ -10,13 +10,16 @@ ColumnLayout {
     property var options: ({})
     signal optionChanged(string key, var value)
 
+    // What Automatic runs on this PC's profile ("" for a model chosen by hand).
+    readonly property string automatic: prefsController.automaticChoice("generate", root.options, prefsController.settings)
+
     spacing: Theme.spaceLg
 
     function whisperReadiness(readiness) {
         var result = {}
         var models = prefsController.modelOptions
         for (var i = 0; i < models.length; i++) {
-            var ready = readiness[modelsController.whisperAssetId(models[i].code)]
+            var ready = readiness[modelsController.whisperAssetId(models[i].code, prefsController.profile)]
             if (ready !== undefined) result[models[i].code] = ready
         }
         return result
@@ -30,7 +33,7 @@ ColumnLayout {
 
         FormRow {
             label: "Model"
-            hint: "Larger models are more accurate but slower."
+            hint: root.automatic ? "On this PC: " + root.automatic + ", from the performance profile." : "Larger models are more accurate but slower."
             StyledComboBox {
                 Layout.fillWidth: true
                 accessibleName: "Transcription model"

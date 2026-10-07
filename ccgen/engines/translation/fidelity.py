@@ -35,6 +35,15 @@ _LENGTH_RATIO = (0.35, 3.0)
 # 0.54-0.59. A single mistranslated word in an otherwise faithful sentence still scores high;
 # the better models, not this check, are what fix those.
 DOUBT_THRESHOLD = 0.62
+# Typical speaking time per character of text, from native speakers in FLEURS (median over ten
+# recordings each). A translation that will be dubbed should take about as long to say as the
+# original, or its line has to be sped up; that rushed sound is what made one rejected dub fail.
+SECONDS_PER_CHAR: dict[str, float] = {
+    "ar": 0.0815, "de": 0.0697, "en": 0.0721, "es": 0.0664, "fr": 0.0472, "hi": 0.0831, "ja": 0.2357,
+    "ko": 0.1561, "pt": 0.08, "ru": 0.0634, "tr": 0.0704, "ur": 0.0781, "zh": 0.2022,
+}
+# How much meaning score a candidate may give up for a speaking time closer to the original's.
+_LENGTH_TOLERANCE = 0.03
 
 
 class MeaningCheck:
@@ -57,17 +66,32 @@ class MeaningCheck:
         similarity = (self._embed(sources) * self._embed(translations)).sum(axis=1)
         return [float(s) - _penalty(src, out, target) for s, src, out in zip(similarity, sources, translations)]
 
-    def choose(self, sources: list[str], candidates: list[list[str]], target: str) -> list[tuple[str, float]]:
-        """For each source, the candidate that keeps its meaning best, with its score."""
+    def choose(
+        self, sources: list[str], candidates: list[list[str]], target: str, spoken_from: Optional[str] = None,
+    ) -> list[tuple[str, float]]:
+        """For each source, the candidate that keeps its meaning best, with its score.
+
+        `spoken_from` (the source language) marks a translation that will be dubbed: among the
+        candidates nearly as faithful as the best, the one that takes about as long to say as
+        the original wins, so its line needn't be sped up.
+        """
         flat_sources = [src for src, options in zip(sources, candidates) for _ in options]
         flat = [option for options in candidates for option in options]
         flat_scores = self.scores(flat_sources, flat, target)
         chosen: list[tuple[str, float]] = []
         start = 0
-        for options in candidates:
+        for source, options in zip(sources, candidates):
             scored = list(zip(options, flat_scores[start:start + len(options)]))
             start += len(options)
-            chosen.append(max(scored, key=lambda pair: pair[1]) if scored else ("", 0.0))
+            if not scored:
+                chosen.append(("", 0.0))
+                continue
+            best = max(scored, key=lambda pair: pair[1])
+            if spoken_from in SECONDS_PER_CHAR and target in SECONDS_PER_CHAR:
+                said = len(source) * SECONDS_PER_CHAR[spoken_from]
+                close = [pair for pair in scored if pair[1] >= best[1] - _LENGTH_TOLERANCE]
+                best = min(close, key=lambda pair: abs(len(pair[0]) * SECONDS_PER_CHAR[target] - said))
+            chosen.append(best)
         return chosen
 
     def _embed(self, texts: list[str]) -> np.ndarray:

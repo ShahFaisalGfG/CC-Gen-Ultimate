@@ -6,7 +6,7 @@ import QtQuick
 QtObject {
     id: theme
 
-    // Set once by main.qml from appController.currentTheme.
+    // Bound by every AppWindow to appController.currentTheme.
     property bool dark: false
 
     // ── Surfaces ─────────────────────────────────────────────────────────────
@@ -34,6 +34,17 @@ QtObject {
     readonly property color dangerSoft:  dark ? "#3a1d1d" : "#fdecec"
     readonly property color warning:     dark ? "#e0b341" : "#8a5a00"
     readonly property color focusRing:   dark ? "#8cc4ff" : "#0b62c4"
+    // Dims the window behind a dialog. Dark in both themes: a pale wash over the dark theme looks
+    // like Windows fading out a frozen app.
+    readonly property color scrim:       dark ? "#8c000000" : "#4d000000"
+    // Highlights the window while files are dragged over it.
+    readonly property color dropFill:    dark ? "#332a6fd6" : "#1a0b62c4"
+    // Toasts use the opposite theme's colors so they stand out from the window.
+    readonly property color inverseSurface: dark ? "#e8eaee" : "#22262e"
+    readonly property color inverseText:    dark ? "#1a1d23" : "#ffffff"
+    // The title bar's close button turns Windows red on hover in both themes.
+    readonly property color closeHover:     "#c42b1c"
+    readonly property color closeHoverText: "#ffffff"
 
     // ── Typography (pixel sizes) ─────────────────────────────────────────────
     readonly property string fontFamily: "Segoe UI Variable Text"
@@ -92,6 +103,7 @@ QtObject {
         workflow: "",
         arrowUp: "",
         arrowDown: "",
-        send: ""
+        send: "",
+        speed: ""
     })
 }

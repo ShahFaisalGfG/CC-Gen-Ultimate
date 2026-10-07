@@ -23,10 +23,17 @@ class TestCatalog:
         assert engine_supports("piper", "ur")
         assert not engine_supports("kokoro", "ar")
 
-    def test_xtts_speaks_urdu_only_through_the_script_bridge(self):
-        assert engine_supports("xtts", "ur")
-        assert not engine_supports("xtts", "ur", bridge=False)
-        assert voices_for("xtts", "ur", bridge=False) == []
+    def test_japanese_and_chinese_have_no_stock_voices(self):
+        # Their stock voices need phonemizers the app doesn't ship; voice cloning speaks them.
+        for engine in ("kokoro", "piper"):
+            assert not engine_supports(engine, "ja")
+            assert not engine_supports(engine, "zh")
+        assert engine_supports("kokoro", "hi")
+        assert engine_supports("omnivoice", "ja") and engine_supports("omnivoice", "zh")
+
+    def test_xtts_has_no_urdu(self):
+        assert not engine_supports("xtts", "ur")
+        assert voices_for("xtts", "ur") == []
 
 
 class TestResolveVoice:
@@ -37,19 +44,14 @@ class TestResolveVoice:
     def test_chinese_uses_xtts_tokenizer_code(self):
         assert resolve_voice("zh", "xtts")[0].model_path == "zh-cn"
 
-    def test_urdu_cloning_reads_hindi_script_and_says_so(self):
+    def test_falls_back_with_a_warning(self):
         voice, warning = resolve_voice("ur", "xtts")
-        assert (voice.engine, voice.language, voice.model_path, voice.bridge) == ("xtts", "ur", "hi", "hi")
-        assert warning is not None and "read the lines in Hindi script" in warning
-
-    def test_falls_back_with_a_warning_when_the_bridge_is_off(self):
-        voice, warning = resolve_voice("ur", "xtts", bridge=False)
         assert voice.engine == "piper"
         assert warning == "XTTS-v2 can't speak 'ur', so Piper was used instead."
 
-    def test_native_xtts_languages_have_no_bridge(self):
+    def test_supported_languages_have_no_warning(self):
         voice, warning = resolve_voice("hi", "xtts")
-        assert (voice.bridge, warning) == ("", None)
+        assert (voice.engine, voice.model_path, warning) == ("xtts", "hi", None)
 
     def test_xtts_without_reference_audio_falls_back(self):
         voice, warning = resolve_voice("en", "xtts", can_clone=False)
@@ -63,6 +65,14 @@ class TestResolveVoice:
     def test_explicit_voice_for_another_language_is_rejected(self):
         with pytest.raises(ValueError, match="speaks 'ur', not 'en'"):
             resolve_voice("en", "piper", "piper:ur_PK-fasih-medium")
+
+    def test_cloning_without_a_recording_explains_why_nothing_speaks(self):
+        with pytest.raises(ValueError, match="OmniVoice needs the original recording"):
+            resolve_voice("ja", "omnivoice", can_clone=False)
+
+    def test_a_stock_mode_for_japanese_points_to_voice_cloning(self):
+        with pytest.raises(ValueError, match=r"Kokoro can't speak 'ja'; choose voice cloning \(OmniVoice\)"):
+            resolve_voice("ja", "kokoro")
 
     def test_unknown_language_is_rejected(self):
         with pytest.raises(ValueError, match="No dubbing voice speaks 'xx'"):

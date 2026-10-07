@@ -8,8 +8,10 @@ from typing import Any, Optional
 
 from PySide6.QtCore import Slot
 
+from ccgen.config import licences
 from ccgen.config.capabilities import language_from_filename
 from ccgen.config.defaults import (
+    AUTO,
     ComputeDefaults,
     DubbingDefaults,
     ModelDefaults,
@@ -17,8 +19,8 @@ from ccgen.config.defaults import (
     TranslationDefaults,
     TransliterationDefaults,
 )
-from ccgen.config.translation_models import ENGINE_NLLB, NLLB_TERMS_SETTING
-from ccgen.config.voices import ENGINE_XTTS, voices_for
+from ccgen.config.profiles import dub_engine, effective_profile, translation_engines
+from ccgen.config.voices import CLONING_ENGINES, voices_for
 from ccgen.controllers.task_ctrl import (
     TaskController,
     subtitle_output_body,
@@ -100,7 +102,6 @@ class TranslateController(TaskController):
             "source_lang": translation.get("source_lang") or TranslationDefaults.DEFAULT_SOURCE_LANG,
             "target_lang": translation.get("target_lang", TranslationDefaults.DEFAULT_TARGET_LANG),
             "engine": translation.get("engine", TranslationDefaults.DEFAULT_ENGINE),
-            "meaning_check": bool(translation.get("meaning_check", TranslationDefaults.MEANING_CHECK)),
         }
 
     def initial_options(self) -> dict[str, Any]:
@@ -110,9 +111,7 @@ class TranslateController(TaskController):
         return {**self.step_options(settings), **subtitle_output_from_settings(settings)}
 
     def extra_blocker(self) -> str:
-        if self._options["engine"] == ENGINE_NLLB and not nllb_terms_accepted(self._saved_settings):
-            return NLLB_TERMS_BLOCKER
-        return ""
+        return licences.blocker(self._saved_settings, translation_models(self._options, self._saved_settings))
 
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:
         unknown = next((i for i in items if not i.get("language")), None)
@@ -121,7 +120,8 @@ class TranslateController(TaskController):
                 f"{os.path.basename(unknown['path'])} has no language in its name. Choose the language "
                 "to translate from, or rename it with a suffix such as movie_en.srt."
             )
-        return ""
+        languages = tuple(i["language"] for i in items if i.get("language"))
+        return licences.blocker(self._saved_settings, translation_models(self._options, self._saved_settings, languages))
 
     def job_body(self, item: dict[str, Any], validating: bool = False) -> dict[str, Any]:
         opts = self._options
@@ -137,7 +137,6 @@ class TranslateController(TaskController):
             "source_lang": source,
             "target_lang": opts["target_lang"],
             "engine": opts["engine"],
-            "meaning_check": bool(opts["meaning_check"]),
         }
 
 
@@ -206,7 +205,7 @@ class DubController(TaskController):
             "output": dubbing.get("output", DubbingDefaults.DEFAULT_OUTPUT),
             "default_track": bool(dubbing.get("default_track", DubbingDefaults.DEFAULT_TRACK)),
             "device": dubbing.get("device", DubbingDefaults.DEVICE_AUTO),
-            "script_bridge": bool(dubbing.get("script_bridge", DubbingDefaults.SCRIPT_BRIDGE)),
+            "quality": dubbing.get("quality", DubbingDefaults.DEFAULT_QUALITY),
         }
 
     def initial_options(self) -> dict[str, Any]:
@@ -250,15 +249,13 @@ class DubController(TaskController):
         super().receiveFiles(subtitles, source, [known.get(p, "") for p in subtitles])
 
     def extra_blocker(self) -> str:
-        if self._options["mode"] == ENGINE_XTTS and not xtts_terms_accepted(self._saved_settings):
-            return XTTS_TERMS_BLOCKER
-        return ""
+        return licences.blocker(self._saved_settings, [dub_model(self._options, self._saved_settings)])
 
     @Slot(str, str, result=list)
     def voiceOptions(self, mode: str, language: str) -> list:
         """Voices the mode offers for a language, after the automatic choice."""
         items = [{"label": "Best voice for the language", "code": DubbingDefaults.VOICE_AUTO}]
-        if mode != ENGINE_XTTS and language != DubbingDefaults.LANGUAGE_AUTO:
+        if mode != AUTO and mode not in CLONING_ENGINES and language != DubbingDefaults.LANGUAGE_AUTO:
             items += [{"label": v.label, "code": v.key} for v in voices_for(mode, language)]
         return items
 
@@ -309,24 +306,23 @@ class DubController(TaskController):
             "output": DubbingDefaults.OUTPUT_WAV if subtitle_only else opts["output"],
             "default_track": bool(opts["default_track"]),
             "device": opts["device"],
-            "script_bridge": bool(opts["script_bridge"]),
+            "quality": opts["quality"],
         }
 
 
-XTTS_TERMS_BLOCKER = "Accept the XTTS-v2 licence to use voice cloning (see the notice under Voices)."
+def translation_models(options: dict[str, Any], settings: dict[str, Any], languages: tuple[str, ...] = ()) -> set[str]:
+    """The translation engines a translate tab or step will run with these options.
+
+    `languages` are the queued files' known languages, used when the source is "auto".
+    """
+    return translation_engines(
+        options["engine"], effective_profile(settings), options["source_lang"], options["target_lang"], languages,
+    )
 
 
-def xtts_terms_accepted(settings: dict[str, Any]) -> bool:
-    """True once the user agreed to the XTTS-v2 licence."""
-    return bool(settings.get("dubbing", {}).get("xtts_terms_accepted"))
-
-
-NLLB_TERMS_BLOCKER = "Accept the NLLB-200 licence to translate with it (see the notice under Translation)."
-
-
-def nllb_terms_accepted(settings: dict[str, Any]) -> bool:
-    """True once the user agreed to the NLLB-200 licence (non-commercial use)."""
-    return bool(settings.get("translation", {}).get(NLLB_TERMS_SETTING))
+def dub_model(options: dict[str, Any], settings: dict[str, Any]) -> str:
+    """The dubbing engine a dub tab or step will run with these options."""
+    return dub_engine(options["mode"], effective_profile(settings)).mode
 
 
 def subtitles_by_stem(folder: str) -> dict[str, list[str]]:

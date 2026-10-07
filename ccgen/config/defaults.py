@@ -12,10 +12,23 @@ class AppInfo:
     APP_DESCRIPTION = "Offline subtitle generation, translation, transliteration, and dubbing"
 
 
+# A model choice that the performance profile resolves (see ccgen/config/profiles.py).
+AUTO = "auto"
+# Version of the settings file layout; ccgen/utils/settings.py migrates older files.
+SETTINGS_VERSION = 2
+
+
+class ProfileDefaults:
+    """Performance profile settings; the profiles themselves are listed in profiles.py."""
+
+    # "" until the hardware has been detected on this PC.
+    DEFAULT_PROFILE = ""
+
+
 class ModelDefaults:
     """Whisper model selection defaults."""
 
-    DEFAULT_MODEL = "base"
+    DEFAULT_MODEL = AUTO
     SUPPORTED_MODELS = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"]
     MODEL_SIZES_MB: dict[str, int] = {
         "tiny": 75,
@@ -62,6 +75,18 @@ class ModelRepos:
     XTTS_REVISION = "6c2b0d75eae4b7047358e3b6bd9325f857d43f77"
     XTTS_FILES = ("config.json", "model.pth", "vocab.json")
     XTTS_SIZE_BYTES = 1_868_294_705
+    OMNIVOICE = "k2-fsa/OmniVoice"
+    OMNIVOICE_REVISION = "c5fdb5ccb189668d56333f77ba2629f4cd7535f4"
+    OMNIVOICE_FILES = (
+        "config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja",
+        "audio_tokenizer/config.json", "audio_tokenizer/model.safetensors", "audio_tokenizer/preprocessor_config.json",
+    )
+    OMNIVOICE_SIZE_BYTES = 3_267_458_000
+    # Speaker vectors that tell voices apart for OmniVoice, which has no speaker encoder of its own.
+    SPEAKER_VECTORS = "microsoft/wavlm-base-plus-sv"
+    SPEAKER_VECTORS_REVISION = "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e"
+    SPEAKER_VECTORS_FILES = ("config.json", "preprocessor_config.json", "pytorch_model.bin")
+    SPEAKER_VECTORS_SIZE_BYTES = 404_606_000
     # Kokoro's ONNX export is published as GitHub release assets: (name, size, sha256).
     KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1"
     KOKORO_FILES: tuple[tuple[str, int, str], ...] = (
@@ -113,9 +138,7 @@ class TranslationDefaults:
 
     DEFAULT_SOURCE_LANG = "auto"
     DEFAULT_TARGET_LANG = "en"
-    # OPUS-MT; kept as a literal here so this module needn't import the model catalog.
-    DEFAULT_ENGINE = "opus_mt"
-    MEANING_CHECK = True
+    DEFAULT_ENGINE = AUTO
 
 
 class OutputDefaults:
@@ -183,10 +206,13 @@ class LanguageOptions:
 
     TRANSLATION_TARGETS: list[tuple[str, str]] = [
         ("Arabic", "ar"),
+        ("Chinese", "zh"),
         ("English", "en"),
         ("French", "fr"),
         ("German", "de"),
         ("Hindi", "hi"),
+        ("Japanese", "ja"),
+        ("Korean", "ko"),
         ("Portuguese", "pt"),
         ("Russian", "ru"),
         ("Spanish", "es"),
@@ -203,9 +229,10 @@ class TransliterationDefaults:
 
     ENGINE_RULE = "rule"
     ENGINE_NEURAL = "neural"
-    DEFAULT_ENGINE = ENGINE_RULE
+    DEFAULT_ENGINE = AUTO
 
     ENGINES: list[tuple[str, str]] = [
+        ("Automatic (recommended)", AUTO),
         ("Rule-based (fast, offline)", ENGINE_RULE),
         ("Neural (higher quality)", ENGINE_NEURAL),
     ]
@@ -231,27 +258,32 @@ class TransliterationDefaults:
 class DubbingDefaults:
     """Speech synthesis defaults for dubbing."""
 
+    MODE_OMNIVOICE = "omnivoice"
     MODE_XTTS = "xtts"
     MODE_KOKORO = "kokoro"
     MODE_PIPER = "piper"
-    DEFAULT_MODE = MODE_XTTS
+    DEFAULT_MODE = AUTO
     # (label, code, trade-offs shown under the mode picker)
     MODES: list[tuple[str, str, str]] = [
+        ("Automatic (recommended)", AUTO,
+         "Clones each original speaker with OmniVoice, in full quality on the Maximum quality "
+         "profile and in its fast mode otherwise, or as set in the Custom profile "
+         "(Preferences > Performance)."),
+        ("Voice cloning (OmniVoice)", MODE_OMNIVOICE,
+         "Clones each original speaker with native pronunciation in every language here, including "
+         "Urdu. Best with an NVIDIA GPU and slow on a CPU; a 3.7 GB download, and its model allows "
+         "non-commercial use only."),
         ("Voice cloning (XTTS-v2)", MODE_XTTS,
          "Clones each original speaker for the most natural dub. Slow without a GPU, a 1.9 GB "
-         "download, speaks every language here (Urdu by reading it in Hindi script), and allows "
-         "non-commercial use only."),
+         "download, speaks every language here except Urdu, and allows non-commercial use only."),
         ("Natural voices (Kokoro)", MODE_KOKORO,
          "Very natural stock voices that run fast on any computer. 350 MB; English, Spanish, French, "
-         "Hindi, Japanese, Portuguese, and Chinese."),
+         "Hindi, and Portuguese."),
         ("Light voices (Piper)", MODE_PIPER,
-         "Small, fast stock voices with the widest language coverage, including Urdu. "
-         "About 60 MB per voice; sounds more synthetic."),
+         "Small, fast stock voices in every language here except Japanese and Chinese, including "
+         "Urdu. About 60 MB per voice; sounds more synthetic."),
     ]
     VOICE_AUTO = "auto"
-    # Voice cloning has no Urdu model; on, it reads Urdu lines in Hindi script with the cloned
-    # voices, off, Urdu falls back to a Piper voice.
-    SCRIPT_BRIDGE = True
     LANGUAGE_AUTO = "auto"
     SPEAKERS_AUTO = "auto"
     SPEAKERS_SINGLE = "single"
@@ -261,7 +293,7 @@ class DubbingDefaults:
         ("One voice for everyone", SPEAKERS_SINGLE),
     ]
     MAX_SPEAKERS = 6
-    # Speech may be sped up this much to fit a cue's time before it is trimmed.
+    # Speech may be sped up this much to fit a sentence's time before it runs over.
     MAX_SPEEDUP = 1.35
     MAX_SPEEDUP_RANGE = (1.0, 2.0)
     OUTPUT_TRACK = "track"
@@ -278,6 +310,17 @@ class DubbingDefaults:
         ("Automatic (best device)", DEVICE_AUTO),
         ("CPU", DEVICE_CPU),
     ]
+    # How carefully OmniVoice refines its speech; "auto" follows the performance profile.
+    QUALITY_FULL = "full"
+    QUALITY_FAST = "fast"
+    DEFAULT_QUALITY = AUTO
+    # (label, code, trade-offs shown under the picker)
+    QUALITIES: list[tuple[str, str, str]] = [
+        ("Automatic", AUTO, "Full quality on the Maximum quality profile, fast mode on the others."),
+        ("Full quality", QUALITY_FULL, "Refines each line in 32 steps; best with a GPU."),
+        ("Fast mode", QUALITY_FAST,
+         "Refines each line in 8 steps: as clear in the benchmark, in a quarter of the time."),
+    ]
     # Sample rate of the assembled dub track.
     TRACK_RATE = 48000
     # Languages offered for dubbing: every spoken language the app transcribes.
@@ -287,6 +330,7 @@ class DubbingDefaults:
 def get_default_settings() -> dict[str, Any]:
     """Return the complete default settings dictionary."""
     return {
+        "version": SETTINGS_VERSION,
         "model": {
             "name": ModelDefaults.DEFAULT_MODEL,
             "device": ComputeDefaults.DEFAULT_DEVICE,
@@ -302,7 +346,6 @@ def get_default_settings() -> dict[str, Any]:
             "source_lang": TranslationDefaults.DEFAULT_SOURCE_LANG,
             "target_lang": TranslationDefaults.DEFAULT_TARGET_LANG,
             "engine": TranslationDefaults.DEFAULT_ENGINE,
-            "meaning_check": TranslationDefaults.MEANING_CHECK,
             "nllb_terms_accepted": False,
         },
         "output": {
@@ -331,8 +374,17 @@ def get_default_settings() -> dict[str, Any]:
             "output": DubbingDefaults.DEFAULT_OUTPUT,
             "default_track": DubbingDefaults.DEFAULT_TRACK,
             "device": DubbingDefaults.DEVICE_AUTO,
-            "script_bridge": DubbingDefaults.SCRIPT_BRIDGE,
+            "quality": DubbingDefaults.DEFAULT_QUALITY,
             "xtts_terms_accepted": False,
+            "omnivoice_terms_accepted": False,
+        },
+        "performance": {
+            "profile": ProfileDefaults.DEFAULT_PROFILE,
+            # The profile recommended for this PC, the hardware it was based on, and a
+            # fingerprint that tells when the hardware changed.
+            "recommended": "",
+            "hardware": "",
+            "hardware_id": "",
         },
         "ui": {
             "theme": "system",

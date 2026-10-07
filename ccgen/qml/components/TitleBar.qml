@@ -136,11 +136,11 @@ Rectangle {
         contentItem: Icon {
             name: button.iconName
             size: 10
-            color: button.closeStyle && button.hovered ? "#ffffff" : Theme.text
+            color: button.closeStyle && button.hovered ? Theme.closeHoverText : Theme.text
         }
         background: Rectangle {
             color: !button.hovered ? "transparent"
-                : button.closeStyle ? "#c42b1c" : Theme.surfaceHover
+                : button.closeStyle ? Theme.closeHover : Theme.surfaceHover
         }
     }
 }

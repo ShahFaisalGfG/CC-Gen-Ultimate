@@ -41,6 +41,7 @@ class _Startup:
         self._task_ctrls: dict[str, Any] = {}
         self._prefs_ctrl = None
         self._assets_ctrl = None
+        self._performance_ctrl = None
 
         self._splash = SplashScreen(resource_path("ccgen/assets/icons/Square310x310Logo.scale-100.png"))
         self._splash.show()
@@ -56,6 +57,7 @@ class _Startup:
         """Build controllers and load the QML UI once the backend is ready."""
         from ccgen.controllers.app_ctrl import AppController
         from ccgen.controllers.assets_ctrl import AssetsController
+        from ccgen.controllers.performance_ctrl import PerformanceController
         from ccgen.controllers.prefs_ctrl import PrefsController
         from ccgen.controllers.task_ctrl import TaskController
         from ccgen.controllers.task_tabs import (
@@ -88,6 +90,7 @@ class _Startup:
             }
             prefs_ctrl = PrefsController(api_server.base_url)
             assets_ctrl = AssetsController(api_server.base_url)
+            performance_ctrl = PerformanceController(api_server.base_url)
             if self._input_paths:
                 # Files opened with the app (e.g. from Explorer's context menu): media gets
                 # subtitles generated, subtitle files are offered for translation.
@@ -102,6 +105,7 @@ class _Startup:
             ctx.setContextProperty("appController",    app_ctrl)
             ctx.setContextProperty("prefsController",  prefs_ctrl)
             ctx.setContextProperty("modelsController", assets_ctrl)
+            ctx.setContextProperty("performanceController", performance_ctrl)
             for name, controller in task_ctrls.items():
                 ctx.setContextProperty(name, controller)
 
@@ -121,6 +125,7 @@ class _Startup:
             self._task_ctrls = task_ctrls
             self._prefs_ctrl = prefs_ctrl
             self._assets_ctrl = assets_ctrl
+            self._performance_ctrl = performance_ctrl
             root = engine.rootObjects()[0]
             self._splash.close()
             if isinstance(root, QQuickWindow):
@@ -128,6 +133,8 @@ class _Startup:
                 _log.info("Window shown - %dx%d at (%d,%d)", root.width(), root.height(), root.x(), root.y())
             else:
                 _log.info("Window created (non-QQuickWindow root)")
+            # After the window shows: detection imports torch, and its result only refines choices.
+            performance_ctrl.detect()
         except Exception as e:
             _log.critical("Failed to build interface: %r", e, exc_info=True)
             self._on_failed(str(e))
@@ -162,6 +169,7 @@ class _Startup:
             self._task_ctrls = {}
             self._prefs_ctrl = None
             self._assets_ctrl = None
+            self._performance_ctrl = None
             if self._api_server is not None:
                 self._api_server.stop()
         except Exception:

@@ -313,7 +313,7 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Theme.spaceXs
             radius: Theme.radiusLarge
-            color: Theme.dark ? "#332a6fd6" : "#1a0b62c4"
+            color: Theme.dropFill
             border.color: Theme.accent
             border.width: 2
             visible: dropArea.containsDrag

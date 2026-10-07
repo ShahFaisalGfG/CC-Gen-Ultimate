@@ -6,7 +6,6 @@
 
 import logging
 import os
-from typing import Optional
 
 from ccgen.config.capabilities import language_from_filename
 from ccgen.core import Segment, TranslatedSegment
@@ -50,12 +49,12 @@ def translate_track(
     source: str,
     target: str,
     ctx: RunContext,
-    meaning: Optional[MeaningCheck] = None,
+    meaning: MeaningCheck,
 ) -> Track:
     """Translate whole sentences of `track`, then spread each translation back over its cues.
 
-    With `meaning`, sentences whose translation drifts from the original are reported by their
-    subtitle numbers so they can be reviewed.
+    Sentences whose translation drifts from the original are reported by their subtitle numbers
+    so they can be reviewed.
     """
     if source == target:
         raise ValueError(f"The subtitles are already in '{target}'. Choose a different target language.")
@@ -87,8 +86,7 @@ def translate_track(
         engine.set_pair(source, target)
         engine.ensure_model(ctx.status, ctx.progress)
         translated_units = engine.translate_segments(unit_segments, ctx.status, ctx.progress, on_unit)
-        if meaning is not None:
-            _report_doubtful(translated_units, units, meaning, target, ctx)
+        _report_doubtful(translated_units, units, meaning, target, ctx)
     except JobCancelled:
         raise
     except Exception as e:
@@ -123,10 +121,17 @@ def _report_doubtful(
         )
 
 
-def create_translator(engine: str, source: str, target: str, meaning_check: bool) -> tuple[TranslationEngine, Optional[MeaningCheck]]:
-    """The engine a translate task or step uses, and its meaning check when that is on."""
-    meaning = MeaningCheck() if meaning_check else None
-    return create_translation_engine(engine, source_lang=source, target_lang=target, meaning=meaning), meaning
+def create_translator(
+    engine: str, source: str, target: str, profile: str, for_speech: bool = False,
+) -> tuple[TranslationEngine, MeaningCheck]:
+    """The engine a translate task or step uses, and the meaning check that keeps it faithful.
+
+    `for_speech` marks a translation that a later step dubs, so it is kept about as long to say.
+    """
+    meaning = MeaningCheck()
+    translator = create_translation_engine(engine, source_lang=source, target_lang=target, meaning=meaning,
+                                           profile=profile, for_speech=for_speech)
+    return translator, meaning
 
 
 class TranslateTask(Task[TranslateConfig]):
@@ -136,7 +141,7 @@ class TranslateTask(Task[TranslateConfig]):
         super().__init__(config)
         self._layout = CueLayout(max_line_length=config.max_line_length, max_lines=config.max_lines)
         self._engine, self._meaning = create_translator(
-            config.engine, config.source_lang, config.target_lang, config.meaning_check,
+            config.engine, config.source_lang, config.target_lang, config.profile,
         )
 
     @property

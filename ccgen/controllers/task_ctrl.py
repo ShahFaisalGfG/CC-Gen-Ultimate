@@ -15,6 +15,7 @@ from PySide6.QtCore import Property, QObject, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWebSockets import QWebSocket
 
 from ccgen.config.defaults import OutputDefaults
+from ccgen.config.profiles import effective_profile
 from ccgen.controllers.api_client import ApiClient
 from ccgen.core.tasks.configs import SUBTITLE_FORMATS
 from ccgen.models.file_model import (
@@ -112,6 +113,10 @@ class TaskController(QObject):
         should assume they will succeed.
         """
         raise NotImplementedError
+
+    def _job(self, item: dict[str, Any], validating: bool = False) -> dict[str, Any]:
+        """The job body with the saved performance profile, which resolves every Automatic choice."""
+        return {**self.job_body(item, validating), "profile": effective_profile(self._saved_settings)}
 
     def add_paths(self, paths: list[str]) -> None:
         """Add files to the queue (the Dub tab pairs subtitles with their media here)."""
@@ -365,7 +370,7 @@ class TaskController(QObject):
             self._set_stage("Starting...", -1.0)
             self.fileStarted.emit(path, os.path.basename(path))
             try:
-                body = self.job_body(item)
+                body = self._job(item)
             except ValueError as e:
                 self._record_result({"success": False, "error": str(e)})
                 continue
@@ -512,7 +517,7 @@ class TaskController(QObject):
             return
         item = items[0] if items else {"path": self.sample_input, "language": "", "companion": "", "kind": ""}
         try:
-            body = self.job_body(item, validating=True)
+            body = self._job(item, validating=True)
         except ValueError as e:
             self._set_server_errors([str(e)])
             return

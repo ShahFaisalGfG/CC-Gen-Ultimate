@@ -5,8 +5,9 @@ from typing import Any, Optional
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtWebSockets import QWebSocket
 
+from ccgen.config import profiles
 from ccgen.config.capabilities import neural_model_key, translation_asset_ids
-from ccgen.config.voices import ENGINE_KOKORO, ENGINE_PIPER, ENGINE_XTTS
+from ccgen.config.voices import ENGINE_KOKORO, ENGINE_OMNIVOICE, ENGINE_PIPER, ENGINE_XTTS
 from ccgen.controllers.api_client import ApiClient
 
 
@@ -41,22 +42,27 @@ class AssetsController(QObject):
         """Map of asset id to whether it is downloaded, for ready/needs-download badges."""
         return self._readiness
 
-    @Slot(str, result=str)
-    def whisperAssetId(self, model_name: str) -> str:
-        """Catalog id of a Whisper model."""
-        return f"whisper:{model_name}"
-
-    @Slot(str, str, str, result=list)
-    def translationAssetIds(self, source: str, target: str, engine: str) -> list:
-        """Catalog ids of every model `engine` needs to translate source→target ("auto": not known yet)."""
-        return translation_asset_ids("" if source == "auto" else source, target, engine)
-
     @Slot(str, str, result=str)
-    def voiceAssetId(self, mode: str, voice_key: str) -> str:
+    def whisperAssetId(self, model_name: str, profile: str) -> str:
+        """Catalog id of a Whisper model ("auto" resolves with the performance profile)."""
+        return f"whisper:{profiles.whisper_model(model_name, profile)}"
+
+    @Slot(str, str, str, str, result=list)
+    def translationAssetIds(self, source: str, target: str, engine: str, profile: str) -> list:
+        """Catalog ids of every model `engine` needs to translate source→target ("auto": not known yet)."""
+        known = "" if source == "auto" else source
+        ids: list[str] = []
+        for resolved in sorted(profiles.translation_engines(engine, profile, source, target)):
+            ids += [i for i in translation_asset_ids(known, target, resolved) if i not in ids]
+        return ids
+
+    @Slot(str, str, str, result=str)
+    def voiceAssetId(self, mode: str, voice_key: str, profile: str) -> str:
         """Catalog id of what a dubbing mode downloads: its model, or a Piper voice ("" when unknown)."""
+        mode = profiles.dub_engine(mode, profile).mode
         if mode == ENGINE_PIPER:
             return f"voices:{voice_key}" if voice_key.startswith(f"{ENGINE_PIPER}:") else ""
-        return f"voices:{mode}" if mode in (ENGINE_XTTS, ENGINE_KOKORO) else ""
+        return f"voices:{mode}" if mode in (ENGINE_OMNIVOICE, ENGINE_XTTS, ENGINE_KOKORO) else ""
 
     @Slot(str, str, result=str)
     def neuralAssetId(self, source: str, target: str) -> str:

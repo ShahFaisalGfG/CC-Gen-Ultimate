@@ -19,11 +19,13 @@ class _FakeModel:
     def __init__(self, seconds: list[float]) -> None:
         self.seconds = list(seconds)
         self.temperatures: list[object] = []
+        self.texts: list[str] = []
         self.tokenizer = SimpleNamespace(char_limits={"en": 250})
         self.config = SimpleNamespace(audio=SimpleNamespace(output_sample_rate=_RATE))
         self.device = "cpu"
 
     def inference(self, text, language, latent, embedding, speed=1.0, **options):
+        self.texts.append(text)
         self.temperatures.append(options.get("temperature"))
         length = self.seconds.pop(0)
         frames = int(length * _FRAMES_PER_S)
@@ -60,6 +62,11 @@ class TestRunawayGuard:
         assert wav.size == int(1.2 * _RATE)
         assert model.temperatures == [None]
         assert not engine.last_line_capped
+
+    def test_an_unfinished_line_is_spoken_with_a_full_stop(self, engine_for):
+        engine, model = engine_for([1.2])
+        engine.synthesize("A short line")
+        assert model.texts == ["A short line."]
 
     def test_a_runaway_take_is_spoken_again_cooler(self, engine_for):
         engine, model = engine_for([6.0, 1.3])

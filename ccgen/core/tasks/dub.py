@@ -10,9 +10,10 @@ import av
 from av.stream import Disposition
 
 from ccgen.config.defaults import DubbingDefaults
+from ccgen.config.profiles import dub_engine
 from ccgen.config.voices import ENGINE_LABELS, resolve_voice
 from ccgen.core.audio import load_audio
-from ccgen.core.dubbing import attach_track, synthesize_track
+from ccgen.core.dubbing import attach_track, media_seconds, synthesize_track
 from ccgen.core.speakers import assign_speakers, reference_clips
 from ccgen.core.subtitle_parser import is_subtitle
 from ccgen.core.tasks.base import RunContext, Task, TaskResult, Track
@@ -21,6 +22,7 @@ from ccgen.core.tasks.outputs import output_path
 from ccgen.core.tasks.translate import load_subtitle_track
 from ccgen.engines.speech import CloningEngine, create_engine
 from ccgen.engines.speech.base import REFERENCE_RATE
+from ccgen.engines.speech.line_check import CHECK_TRANSCRIBER, LineChecker, load_transcriber
 
 _log = logging.getLogger(__name__)
 
@@ -34,6 +36,8 @@ class DubSettings:
     """How to speak a track; shared by the dub task and the workflow's dub step."""
 
     mode: str
+    # The engine's faster mode (OmniVoice with fewer denoising steps), from the profile.
+    fast: bool
     voice: str
     speakers: str
     max_speakers: int
@@ -41,7 +45,6 @@ class DubSettings:
     output: str
     default_track: bool
     device: str
-    script_bridge: bool = DubbingDefaults.SCRIPT_BRIDGE
 
 
 class Dubber:
@@ -50,10 +53,10 @@ class Dubber:
     def __init__(self, settings: DubSettings, language: str, can_clone: bool, ctx: RunContext) -> None:
         self.settings = settings
         self.language = language
-        self.voice, warning = resolve_voice(language, settings.mode, settings.voice, can_clone, settings.script_bridge)
+        self.voice, warning = resolve_voice(language, settings.mode, settings.voice, can_clone)
         if warning:
             ctx.warn(warning)
-        self.engine = create_engine(self.voice, settings.device)
+        self.engine = create_engine(self.voice, settings.device, settings.fast)
 
     def load(self, ctx: RunContext) -> None:
         """Download (first use) and load the speech model."""
@@ -82,9 +85,14 @@ class Dubber:
         os.close(fd)
         try:
             ctx.begin("speak", f"Speaking {len(track.cues)} lines on {self.engine.device_label}...")
+            # Cloned voices are sampled, so each line is heard back and retaken if it came out garbled.
+            checker = None
+            if isinstance(self.engine, CloningEngine):
+                checker = LineChecker(load_transcriber(CHECK_TRANSCRIBER), self.language)
             report = synthesize_track(
                 track.cues, speakers, self.engine, self.settings.max_speedup, wav_path,
-                progress=ctx.progress, cancelled=ctx.is_cancelled,
+                progress=ctx.progress, cancelled=ctx.is_cancelled, checker=checker, language=self.language,
+                end=media_seconds(media_path) if media_path else None,
             )
             for warning in report.warnings():
                 ctx.warn(warning)
@@ -176,7 +184,7 @@ class DubTask(Task[DubConfig]):
             )
         self._track = Track(cues=track.cues, language=language)
         can_clone = bool(cfg.reference_audio or self.media_path)
-        self._dubber = Dubber(dub_settings(cfg), language, can_clone, ctx)
+        self._dubber = Dubber(dub_settings(cfg, cfg.profile), language, can_clone, ctx)
         self._dubber.load(ctx)
 
     def _run(self, ctx: RunContext) -> TaskResult:
@@ -195,10 +203,11 @@ class DubTask(Task[DubConfig]):
         )
 
 
-def dub_settings(cfg: Union[DubConfig, DubStep]) -> DubSettings:
-    """Pick the speech settings out of a dub config or a workflow's dub step."""
+def dub_settings(cfg: Union[DubConfig, DubStep], profile: str) -> DubSettings:
+    """Pick the speech settings out of a dub config or a workflow's dub step, resolving an
+    "auto" mode and quality with the performance profile."""
+    choice = dub_engine(cfg.mode, profile, cfg.quality)
     return DubSettings(
-        mode=cfg.mode, voice=cfg.voice, speakers=cfg.speakers, max_speakers=cfg.max_speakers,
+        mode=choice.mode, fast=choice.fast, voice=cfg.voice, speakers=cfg.speakers, max_speakers=cfg.max_speakers,
         max_speedup=cfg.max_speedup, output=cfg.output, default_track=cfg.default_track, device=cfg.device,
-        script_bridge=cfg.script_bridge,
     )

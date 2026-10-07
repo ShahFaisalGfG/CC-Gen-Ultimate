@@ -36,8 +36,10 @@ CC-Gen-Ultimate is a **free, open-source** desktop app that turns any video or a
   - [Quick Start](#quick-start)
   - [Screenshots](#screenshots)
   - [How It Works](#how-it-works)
+    - [Performance Profiles](#performance-profiles)
     - [Whisper Model Sizes](#whisper-model-sizes)
     - [Supported Languages \& Scripts](#supported-languages--scripts)
+    - [Translation Models](#translation-models)
     - [Transliteration Engines](#transliteration-engines)
     - [Dubbing Voices](#dubbing-voices)
   - [Privacy \& Offline Guarantees](#privacy--offline-guarantees)
@@ -76,10 +78,11 @@ Most auto-captioning tools are cloud services in disguise: upload your file, wai
 
 - 🔒 **100% offline** - no accounts, no cloud sync, no telemetry, models download once and never again
 - 🎙️ **Whisper-accurate transcription** - powered by `faster-whisper`, from a 75 MB `tiny` model up to `large-v3`, including the fast `large-v3-turbo`, on CPU or NVIDIA GPU
-- 🌍 **Built-in translation** - 10 target languages via fully offline neural machine translation (OPUS-MT by default, with NLLB-200, MADLAD-400, and Argos to choose from), plus a meaning check that keeps each line faithful to the original
+- 🌍 **Built-in translation** - 13 target languages via fully offline neural machine translation; Automatic picks the best free model for each language pair (OPUS-MT, Hy-MT2), with NLLB-200, MADLAD-400, and Argos to choose from, plus a meaning check that keeps each line faithful to the original
 - ✍️ **Real Roman Urdu, not academic transliteration** - a dedicated converter tuned for colloquial spelling ("kya haal hai", not diacritic-laden Sanskrit-style romanization)
 - 🔀 **Two transliteration engines** - a fast rule-based converter and an optional neural engine for higher-quality output, your choice
-- 🗣️ **Dubbing with voice cloning** - speak translated subtitles in each original speaker's voice (XTTS-v2), or with natural Kokoro or light Piper voices, added to the video as a new audio track
+- 🗣️ **Dubbing with voice cloning** - speak translated subtitles in each original speaker's voice with native pronunciation in all 13 languages, Urdu included (OmniVoice), or with XTTS-v2, natural Kokoro, or light Piper voices, added to the video as a new audio track
+- 🖥️ **Tuned to your PC** - a performance profile, recommended from your GPU, memory, and processor, picks the best models a PC runs well: the largest on a strong NVIDIA GPU, lighter ones on an ordinary laptop
 - ⚡ **Uses your GPU** - NVIDIA, AMD, Intel, and Apple Silicon GPUs speed up dubbing; Kokoro and Piper voices run on whichever device is fastest, voice cloning runs on the first GPU that works, and the CPU takes over if a GPU can't run a voice
 - 🎨 **Modern, clean UI** - PySide6 + QML with System, Light, and Dark themes
 - 📦 **Two install modes** - system-wide and per-user (no admin required)
@@ -92,9 +95,10 @@ Most auto-captioning tools are cloud services in disguise: upload your file, wai
 - **One tab per job** - Generate, Translate, Transliterate, and Dub each have their own queue, settings, and Start button, so one job never quietly depends on another
 - **Generate** - drag in video/audio files, get word-timestamped subtitles via `faster-whisper`; runs on an NVIDIA GPU automatically when CUDA is available, otherwise on the CPU
 - **Readable subtitle layout** - speech is split into cues of up to two balanced 42-character lines, breaking at sentence ends, commas, and pauses, with a comfortable minimum display time and no overlapping cues (line length and line count are configurable)
-- **Translate** - translate subtitle files into any of 10 supported languages, fully offline, models auto-downloaded once; whole sentences are translated and mapped back onto the subtitle timing, and pairs without a direct model are bridged through English. The source language comes from names like `movie_en.srt`, from the tab a file was sent from, or your choice. See [Translation Models](#translation-models)
+- **Translate** - translate subtitle files into any of 13 supported languages, fully offline, models auto-downloaded once; whole sentences are translated and mapped back onto the subtitle timing, and pairs without a direct model are bridged through English. The source language comes from names like `movie_en.srt`, from the tab a file was sent from, or your choice. See [Translation Models](#translation-models)
 - **Transliterate** - convert subtitle files between 14 scripts, including a purpose-built Urdu ⇄ Roman Urdu converter, with a lightweight rule-based engine or a higher-quality neural engine
-- **Dub** - speak a subtitle file and add the speech to its video as a new, language-tagged audio track (`movie_dub_es.mkv`), keeping the original audio, subtitles, and chapters; or save it as a separate WAV file. See [Dubbing Voices](#dubbing-voices)
+- **Dub** - speak a subtitle file and add the speech to its video as a new, language-tagged audio track (`movie_dub_es.mkv`), keeping the original audio, subtitles, and chapters; or save it as a separate WAV file. Every cloned line is heard back and spoken again if it came out garbled. See [Dubbing Voices](#dubbing-voices)
+- **Performance profiles** - Maximum quality, Balanced, or Light, chosen for your PC on first start and changeable in Preferences, or Custom to choose every model yourself; every model picker's **Automatic** choice follows it, and picking a model yourself overrides it for that feature. See [Performance Profiles](#performance-profiles)
 - **Workflow** - build a chain of steps (for example Generate, then Translate to Spanish, then Dub), add, remove, and reorder steps, and choose which earlier step each one reads; every queued file runs through every step
 - **Send to another tab** - right-click a finished file to hand its results to Translate, Transliterate, or Dub, together with their language
 - **Multi-file queues** - add files or entire folders (including subfolders; thousands of files load in about a second), drag-and-drop supported; files run one after another with per-file progress, errors, and notes, and Cancel keeps the rest of the queue for later. Tabs can run at the same time; their jobs take turns so they never compete for the GPU
@@ -168,28 +172,40 @@ Every tab runs one task; the Workflow tab runs several in the order you set, pas
 
 ```
 Generate       video/audio ─► decode (PyAV) ─► transcribe (faster-whisper) ─► readable cues ─► video.srt
-Translate      subtitles ─► translate whole sentences (OPUS-MT + meaning check) ─► video_<lang>.srt
+Translate      subtitles ─► translate whole sentences (best model for the pair + meaning check) ─► video_<lang>.srt
 Transliterate  subtitles ─► convert script (rule or neural engine) ─► video_tr_<source>_<target>.srt
-Dub            subtitles + video ─► find speakers ─► speak each line at its time ─► video_dub_<lang>.mkv
+Dub            subtitles + video ─► find speakers ─► speak each sentence at its time, hear it back ─► video_dub_<lang>.mkv
 ```
+
+### Performance Profiles
+
+Every model picker offers **Automatic**, which follows the performance profile under **Preferences > Performance**. The first time the app starts on a PC it measures the GPU, memory, and processor, chooses a profile, and says so; it measures again on every start and follows hardware changes unless you picked a profile yourself.
+
+| Profile | Recommended for | Subtitles | Translation | Transliteration | Dubbing |
+|---|---|---|---|---|---|
+| **Maximum quality** | NVIDIA GPU with 8 GB or more | Whisper large-v3 | Best free model for each pair | Neural where available | OmniVoice, full quality |
+| **Balanced** | GPU with 4-8 GB, or 8+ CPU cores and 16 GB RAM | Whisper large-v3-turbo | Best free model for each pair | Neural where available | OmniVoice, fast mode |
+| **Light** | Any other PC | Whisper small | Best free model for each pair | Rule-based | OmniVoice, fast mode |
+
+Choosing a specific model on any tab or in Preferences overrides the profile for that feature only, and the Performance page marks it as chosen by hand. The **Custom** profile puts every choice on the Performance page: the model for subtitle generation, translation, transliteration, and dubbing, and the **Voice cloning quality** (full quality or fast mode). Its Automatic choices follow the profile recommended for this PC, and it is kept when the hardware changes. **Use Automatic for every model** hands every choice back to the profile. The choices come from the quality benchmark in [`scripts/eval`](scripts/eval/README.md), which scores each model on professional reference translations (FLORES-200) and on native speakers (FLEURS) in every supported language.
 
 ### Whisper Model Sizes
 
 | Model | Size | Speed (CPU) | Quality |
 |-------|------|-------------|---------|
 | tiny | 75 MB | Fastest | Basic |
-| **base** | **145 MB** | **Fast** | **Default - good balance** |
-| small | 466 MB | Moderate | Good |
+| base | 145 MB | Fast | Good for clear speech |
+| small | 466 MB | Moderate | Good - Automatic on the Light profile |
 | medium | 1.5 GB | Slow | High |
-| large-v3-turbo | 1.6 GB | Moderate | Near-best - recommended with a GPU |
-| large-v3 | 3.0 GB | Very slow | Best |
+| large-v3-turbo | 1.6 GB | Moderate | Near-best - Automatic on the Balanced profile |
+| large-v3 | 3.0 GB | Very slow | Best - Automatic on the Maximum quality profile |
 
 ### Supported Languages & Scripts
 
 | Stage | Options |
 |---|---|
 | **Transcription** | Auto-detect, Arabic, Chinese, English, French, German, Hindi, Japanese, Korean, Portuguese, Russian, Spanish, Turkish, Urdu |
-| **Translation targets** | Arabic, English, French, German, Hindi, Portuguese, Russian, Spanish, Turkish, Urdu |
+| **Translation targets** | Arabic, Chinese, English, French, German, Hindi, Japanese, Korean, Portuguese, Russian, Spanish, Turkish, Urdu |
 | **Dubbing** | Arabic, Chinese, English, French, German, Hindi, Japanese, Korean, Portuguese, Russian, Spanish, Turkish, Urdu (see [Dubbing Voices](#dubbing-voices) for which voices speak each) |
 | **Transliteration scripts** | Roman/Latin, Urdu (Nastaliq), Hindi (Devanagari), Bengali, Gujarati, Punjabi (Gurmukhi), Tamil, Telugu, Kannada, Malayalam, Odia, Sinhala, Thai, Burmese |
 
@@ -199,13 +215,16 @@ Choose the model under **Preferences > Translation** (or per session on the Tran
 
 | Model | Quality | Speed (CPU) | Download | Licence |
 |---|---|---|---|---|
-| **OPUS-MT** *(default, recommended)* | Accurate; keeps names and technical terms such as GitHub | Fast (about half a second per sentence) | 300-900 MB per direction, stored at a quarter of that | Apache-2.0 / CC-BY-4.0 |
+| **Automatic** *(default, recommended)* | The best free model for each language pair: OPUS-MT, with Hy-MT2 into Japanese, Korean, and Chinese and from Japanese and Korean | As below | As below | Free for any use |
+| **OPUS-MT** | Accurate; keeps names and technical terms such as GitHub | Fast (about half a second per sentence) | 300-900 MB per direction, stored at a quarter of that | Apache-2.0 / CC-BY-4.0 |
 | **NLLB-200 1.3B** | Equally faithful, strongest from Urdu into English; every pair directly | About 2x slower | 1.3 GB once | CC-BY-NC-4.0 (non-commercial use; asks once for your agreement) |
+| **Hy-MT2 1.8B** | Most accurate into Japanese, Korean, and Chinese and from Japanese and Korean; keeps names and technical terms; every pair directly | A few seconds per sentence | 1.1 GB once | Apache-2.0 |
 | **MADLAD-400 3B** | Good; every pair directly | Slow without an NVIDIA GPU (several seconds per sentence) | 2.8 GB once | Apache-2.0 |
 | **Argos Translate (light)** | Rougher; can mistranslate terms | Fast | About 100 MB per direction | MIT / CC-BY |
 
-- **Through English** - OPUS-MT and Argos have one model per direction to or from English; other pairs (for example Urdu to French) are translated through English.
-- **Meaning check** - on by default. The last step produces several candidate translations, and a small multilingual model (120 MB) keeps the one whose meaning stays closest to the original sentence, preferring candidates that keep names and technical terms. Lines that may still drift are listed in a note on the file so you can review them. It catches invented or dropped content; a single mistranslated word inside an otherwise faithful sentence is up to the model itself.
+- **Through English** - OPUS-MT and Argos have one model per direction to or from English; other pairs (for example Urdu to French) are translated through English. OPUS-MT has no Japanese, Korean, or Chinese target and no usable Korean model, and translates Japanese less accurately, so Automatic uses Hy-MT2 there. From Chinese, OPUS-MT kept the meaning better.
+- **For dubbing** - when a workflow dubs a translation, the meaning check also prefers, among nearly equally faithful candidates, the one that takes about as long to say as the original line, so the dub needs less speeding up.
+- **Meaning check** - always on. The last step produces several candidate translations, and a small multilingual model (120 MB) keeps the one whose meaning stays closest to the original sentence, preferring candidates that keep names and technical terms. Lines that may still drift are listed in a note on the file so you can review them. It catches invented or dropped content; a single mistranslated word inside an otherwise faithful sentence is up to the model itself.
 
 ### Transliteration Engines
 
@@ -213,28 +232,34 @@ Urdu's Arabic-derived script doesn't romanize the way a purely academic translit
 
 | Engine | Speed | Download | Best For |
 |---|:---:|---|---|
-| **Rule-based** *(default)* | Fast | None - built in | Offline-first use, older PCs, instant results |
+| **Automatic** *(default)* | Follows the profile | As below | Neural where a model exists, except on the Light profile |
+| **Rule-based** | Fast | None - built in | Offline-first use, older PCs, instant results |
 | **Neural** | Slower | ~50 MB - 2 GB on first use, per direction | Higher-quality, more natural output |
 
 > **Note:** the neural engine's Hindi→Urdu model is distributed under an unclear license (its upstream repository ships an empty `LICENSE` file). It's included because it's currently the only option for that direction, but if you have licensing concerns, stick to the rule-based engine - it's fully open-source (0BSD) and available offline by default.
 
 ### Dubbing Voices
 
-The Dub tab (and Dub workflow steps) offers three kinds of voices:
+The Dub tab (and Dub workflow steps) offers these voices:
 
 | Voices | Sounds like | Speed | Download | Languages |
 |---|---|---|---|---|
-| **Voice cloning (XTTS-v2)** *(default)* | Each original speaker | Slow without a GPU | 1.9 GB once | All (Urdu is read in Hindi script) |
-| **Natural voices (Kokoro)** | Natural stock voices | Fast on any computer | 350 MB once | English, Spanish, French, Hindi, Japanese, Portuguese, Chinese |
-| **Light voices (Piper)** | Clear but more synthetic stock voices | Fast | About 60 MB per voice | All, including Urdu |
+| **Automatic** *(default)* | Each original speaker, through OmniVoice | Follows the profile | As below | All |
+| **Voice cloning (OmniVoice)** | Each original speaker, with native pronunciation | Best with an NVIDIA GPU; on a CPU, several minutes per minute of speech in fast mode | 3.7 GB once | All, including Urdu |
+| **Voice cloning (XTTS-v2)** | Each original speaker | Slow without a GPU | 1.9 GB once | All except Urdu |
+| **Natural voices (Kokoro)** | Natural stock voices | Fast on any computer | 350 MB once | English, Spanish, French, Hindi, Portuguese |
+| **Light voices (Piper)** | Clear but more synthetic stock voices | Fast | About 60 MB per voice | All except Japanese and Chinese, including Urdu |
+
+Japanese and Chinese are dubbed with voice cloning only: their stock voices need pronunciation dictionaries the app doesn't include, and without them they can't read kanji or hanzi.
 
 - **Speakers** - voice cloning listens to the original audio, tells the speakers apart, and gives each one their own cloned voice. Choose **One voice for everyone** to skip that.
-- **Timing** - each line starts exactly when its subtitle does. A line that doesn't fit before the next one is spoken faster, up to the **Fastest speech** limit (1.35x by default), and is then cut short with a note on the file. With voice cloning, speeding a line up reuses the work already done for it, so it costs a fraction of speaking the line again.
+- **Timing** - speech is spoken a sentence at a time, so a sentence split over several subtitles is said once, with natural intonation, in the time of all of them. Each sentence starts exactly when its first subtitle does. A sentence that doesn't fit before the next one is spoken faster, up to the **Fastest speech** limit (1.35x by default); if it is still too long, it may run up to a second into the next sentence's time, which then starts a little later. Only beyond that, or past the end of the video, is it cut short, with a note on the file. OmniVoice knows how long a line will take before speaking it, so it speaks the line at the right speed in one pass; XTTS-v2 reuses the work already done for a line, so speeding it up costs a fraction of speaking it again.
 - **Devices** - with **Run on: Automatic**, Kokoro and Piper voices time a short sample on each GPU and the CPU and use the fastest (small voices often run faster on the CPU than on integrated graphics). The choice is kept until the app closes, so later jobs start sooner. Voice cloning is always faster on a GPU, so it uses the first one that loads the model (NVIDIA or AMD, then Intel, Apple, and DirectML) without timing them. A GPU that fails on a line hands the rest of the job to the CPU.
-- **Urdu with voice cloning** - XTTS-v2 has no Urdu model, so with **Urdu in Hindi script** on (the default) it reads Urdu lines written in Devanagari through its Hindi voice. Spoken Urdu and Hindi share their sounds, so the dub sounds like Urdu in each original speaker's voice, though a few words may sound Hindi-accented; the file shows a note saying so. Turn the option off to dub Urdu with a Piper voice instead.
-- **Fallback** - if the chosen voices can't speak a language, the next option that can is used and the file shows a note saying so.
+- **Fast mode** - OmniVoice refines each line in 32 steps on the Maximum quality profile and in 8 on the others, unless the Custom profile sets the voice cloning quality. The benchmark measured the same intelligibility and speaker similarity in Urdu at a quarter of the time.
+- **Line check** - cloned voices are sampled, so now and then a line comes out garbled or keeps talking past its text. Every cloned line is transcribed back with Whisper; one that doesn't match its text is spoken again (up to twice) and the best take is kept. Lines still unclear afterwards are listed in a note on the file.
+- **Fallback** - if the chosen voices can't speak a language (XTTS-v2 has no Urdu, for example), the first stock voice that can is used and the file shows a note saying so.
 - **Result** - the dub is added as a new audio track in a copy of the video (`movie_dub_es.mkv`), tagged with its language and kept beside the original track; turn on **Play the dub by default** to make players start with it. A subtitle file on its own becomes a WAV file.
-- **Licence** - XTTS-v2 is released under the [Coqui Public Model License](https://coqui.ai/cpml), which allows non-commercial use of the model and the audio it creates. The app asks you to accept it once before the first use. Kokoro and Piper voices don't have this limit. Only clone voices you have permission to use.
+- **Licence** - OmniVoice's model is released under a Creative Commons Attribution-NonCommercial licence and XTTS-v2 under the [Coqui Public Model License](https://coqui.ai/cpml); both allow non-commercial use of the model and the audio it creates. The app asks you to accept each one once before its first use. Kokoro and Piper voices don't have this limit. Only clone voices you have permission to use.
 
 ---
 
@@ -255,11 +280,12 @@ CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app pro
 
 | Section | Contents |
 |---|---|
+| **Performance** | This PC's hardware (with **Detect again**), the performance profile, what each feature uses on it (or, on Custom, a picker for each model and the voice cloning quality), and **Use Automatic for every model** |
 | **Appearance** | Theme: System / Light / Dark |
 | **Transcription** | Default model and spoken language, compute device (Automatic / CPU / NVIDIA GPU), skip silence and music (voice activity filter) |
-| **Translation** | Translation model, default source language (or detect from each file), target language, and the meaning check |
+| **Translation** | Translation model, default source language (or detect from each file), and target language |
 | **Transliteration** | Default source/target script and engine (rule/neural) |
-| **Dubbing** | Default voices, speakers, whether voice cloning reads Urdu in Hindi script, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
+| **Dubbing** | Default voices, speakers, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
 | **Subtitles** | Default formats, characters per line, lines per subtitle, default save folder |
 | **Advanced** | Logging on/off, log detail (warnings and errors / everything), open or clear the log files |
 
@@ -291,9 +317,9 @@ pip install -r requirements.txt
 python app.py
 
 # ...or run one task without the UI
-python main.py generate path\to\video.mp4 --model base --formats srt,vtt
-python main.py translate path\to\video_en.srt --target-lang ur   # --engine nllb|madlad|argos, --no-meaning-check
-python main.py dub path\to\video.mp4 --subtitle path\to\video_ur.srt --mode piper
+python main.py generate path\to\video.mp4 --formats srt,vtt   # --model small|large-v3-turbo|..., --profile light|balanced|quality
+python main.py translate path\to\video_en.srt --target-lang ur   # --engine nllb|madlad|argos
+python main.py dub path\to\video.mp4 --subtitle path\to\video_ur.srt   # --mode omnivoice|xtts|kokoro|piper, --quality full|fast
 python main.py workflow path\to\video.mp4 steps.json   # e.g. [{"kind": "generate"}, {"kind": "translate", "input": "step:0", "target_lang": "ur"}]
 python main.py --help   # every task and its options
 ```
@@ -325,17 +351,18 @@ The PyInstaller options live in `scripts/bundle.ps1`, shared by every build scri
 | Issue | Solution |
 |---|---|
 | First run is slow | The selected Whisper/translation/transliteration model is downloading - this only happens once per model |
-| Translation/transliteration fails with a language-pair error | Not every language pair has a pre-trained offline model; try translating to/from English as an intermediate step, or pick NLLB-200 or MADLAD-400, which translate every pair directly |
+| Translation/transliteration fails with a language-pair error | Not every language pair has a pre-trained offline model; try translating to/from English as an intermediate step, or pick Hy-MT2, NLLB-200, or MADLAD-400, which translate every pair directly |
 | "may not say the same as the original" | The meaning check found lines whose translation drifted; review those subtitles, or try another model under **Preferences > Translation** |
 | GUI window doesn't appear | Check the log output for "Embedded API server failed to start" - another process may be holding the local port |
-| Slow transcription on CPU | Use a smaller model (`base`/`small`), or `large-v3-turbo` on an NVIDIA GPU |
+| Slow transcription on CPU | Use a smaller model (`base`/`small`), or `large-v3-turbo` on an NVIDIA GPU, or the Light profile under **Preferences > Performance** |
+| Dubbing takes a long time | Voice cloning is heavy on a CPU; OmniVoice's fast mode (Light and Balanced profiles) takes a quarter of the full-quality time, and Kokoro or Piper voices run faster than real time |
 | GPU isn't used | Install the CUDA 12 and cuDNN 9 runtime libraries; with **Run on: Automatic** the app falls back to the CPU when they're missing (the status line shows "Model ready (CPU)") |
 | Cancel takes a few seconds | Transcription stops at the end of the current 30-second audio window; the status shows "Cancelling..." until then |
 | A file shows "Failed" | Hover it to read the error; failed files run again on the next Start |
 | "has no audio track" | The video has no sound stream (for example a screen recording made with audio off); there is nothing to caption or clone |
 | Dubbing with voice cloning is slow | XTTS-v2 needs a GPU to be quick; on a CPU expect several times the video's length. Kokoro and Piper voices are much faster |
 | Dub tab says to accept the XTTS-v2 licence | Click **Review licence** under **Voices** and accept it, or choose Kokoro or Piper voices |
-| "line(s) were too long for their time" | Those lines were cut short. Raise **Fastest speech**, or shorten the subtitle text |
+| "line(s) were too long for their time" | Those lines ran more than a second past their time even at the fastest speech, so they were cut short. Raise **Fastest speech**, or shorten the subtitle text |
 | "No subtitle found" on the Dub tab | Add the subtitle with its video (`movie.mp4` + `movie_es.srt` pair up), or right-click the video and choose **Choose subtitle to speak...** |
 | "has no language in its name" | Pick the subtitle's language in the tab's settings instead of the automatic choice, or rename the file with a language suffix such as `movie_en.srt` |
 | "Nothing was written in ..., so the text is unchanged" | The subtitles are in a different script from the one chosen under **Scripts**; pick the script they are written in |
@@ -379,7 +406,7 @@ Have a feature idea or a use case not covered above? [Start a discussion](https:
 
 The source code is released under the [MIT License](LICENSE) - free to use, modify, and distribute. The installers bundle GPL-3.0 dubbing components (Piper and eSpeak NG), so the distributed app is conveyed under GPL-3.0-or-later terms; see [Third-Party Notices](THIRD_PARTY_NOTICES.md) for every bundled library and downloaded model and its licence.
 
-Built with faster-whisper, CTranslate2, OPUS-MT (University of Helsinki), NLLB-200, MADLAD-400, sentence-transformers' multilingual MiniLM, argostranslate, indic-transliteration, the transformers/PyTorch ecosystem, Coqui XTTS-v2, Kokoro, and Piper.
+Built with faster-whisper, CTranslate2, OPUS-MT (University of Helsinki), Hy-MT2 (Tencent) on llama.cpp, NLLB-200, MADLAD-400, sentence-transformers' multilingual MiniLM, argostranslate, indic-transliteration, the transformers/PyTorch ecosystem, OmniVoice (k2-fsa), Coqui XTTS-v2, Kokoro, and Piper. OmniVoice's audio codec is built with Higgs Materials licensed from Boson AI USA, Inc. and Meta Llama 3 (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
 Built with ❤️ by **Shah Faisal** · [Portfolio](https://shahfaisalgfg.github.io/shahfaisal/) · [shahfaisalgfg@outlook.com](mailto:shahfaisalgfg@outlook.com)
 

@@ -1,7 +1,8 @@
 # model_files.py - download, prepare, and remove CTranslate2 translation models
 #
 # Each model lives in its own folder under %LOCALAPPDATA%\CC-Gen-Ultimate\translation. Repos
-# that already hold a CTranslate2 model (NLLB, MADLAD) are downloaded as they are. OPUS-MT
+# that already hold a CTranslate2 model (NLLB, MADLAD) are downloaded as they are, and Hy-MT2 is
+# a single GGUF file for llama.cpp. OPUS-MT
 # publishes Transformers checkpoints, so after downloading one it is converted once to an 8-bit
 # CTranslate2 model (about a quarter of the size) and the original weights are deleted; its
 # tokenizer files stay. A small marker records the finished revision, so an interrupted
@@ -13,10 +14,10 @@ import os
 import shutil
 from typing import Callable, Optional
 
-from huggingface_hub import list_repo_files, snapshot_download
+from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
 
 from ccgen.config.defaults import AppInfo
-from ccgen.config.translation_models import MEANING_MODEL, Ct2Model
+from ccgen.config.translation_models import MEANING_MODEL, Ct2Model, GgufModel
 from ccgen.utils.callbacks import emit_status
 from ccgen.utils.download_progress import download_progress, retry_hf_load
 
@@ -78,6 +79,20 @@ def ensure_model(model: Ct2Model, status_cb: StatusCb = None, progress_cb: Progr
         _mark_ready(model.key, model.revision)
         _log.info("Translation model ready: %s", model.key)
     return ct2_folder(model)
+
+
+def ensure_gguf(model: GgufModel, status_cb: StatusCb = None, progress_cb: ProgressCb = None) -> str:
+    """Download a GGUF model when needed; return the path of its file."""
+    folder = model_folder(model.key)
+    if not is_ready(model.key, model.revision):
+        emit_status(status_cb, f"Downloading translation model ({model.label})...")
+        if os.path.isdir(folder):
+            shutil.rmtree(folder)  # a previous attempt stopped part way
+        with download_progress(progress_cb):
+            retry_hf_load(lambda: hf_hub_download(model.repo, model.filename, revision=model.revision, local_dir=folder))
+        _mark_ready(model.key, model.revision)
+        _log.info("Translation model ready: %s", model.key)
+    return os.path.join(folder, model.filename)
 
 
 def ensure_meaning_model(status_cb: StatusCb = None, progress_cb: ProgressCb = None) -> str:

@@ -5,7 +5,9 @@ PySide6>=6.7.0
 indic-transliteration>=2.3
 fastapi>=0.115
 uvicorn[standard]>=0.32
-transformers>=4.44
+# OmniVoice (vendored in ccgen/engines/speech/omnivoice) needs Qwen3, added in 4.51; its code is
+# adapted to the 4.x API, which XTTS-v2 also needs.
+transformers>=4.51,<5
 # coqui-tts refuses to import on torch 2.9+ without torchcodec and FFmpeg DLLs it never uses for
 # inference, and torchaudio stops at 2.11; 2.8 is the newest pair XTTS runs on cleanly. The build
 # scripts install the CUDA or XPU build of this same version (see scripts/bundle.ps1).
@@ -13,6 +15,11 @@ torch>=2.2,<2.9
 torchaudio>=2.2,<2.9
 sentencepiece>=0.2.0
 huggingface_hub>=0.24
+# Hardware detection for the recommended performance profile.
+psutil>=5.9
+# Hy-MT2 translation: the CPU build of llama.cpp's Python bindings, from its prebuilt wheels.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+llama-cpp-python==0.3.19
 # Dubbing: XTTS-v2 voice cloning (with its Japanese, Chinese, and Korean text support),
 # Kokoro and Piper stock voices.
 coqui-tts[ja,zh,ko]>=0.27.5,<0.28

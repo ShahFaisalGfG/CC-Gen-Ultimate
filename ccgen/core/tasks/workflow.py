@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 
 from ccgen.config.defaults import DubbingDefaults
+from ccgen.config.profiles import transliteration_engine, whisper_model
 from ccgen.core.audio import load_audio
 from ccgen.core.cues import CueLayout
 from ccgen.core.subtitle_parser import is_subtitle
@@ -47,7 +48,9 @@ class WorkflowTask(Task[WorkflowConfig]):
         super().__init__(config)
         self._layout = CueLayout(max_line_length=config.max_line_length, max_lines=config.max_lines)
         self._captioners: dict[int, CaptionEngine] = {
-            i: create_caption_engine(model_name=s.model_name, device=s.device, compute_type=s.compute_type)
+            i: create_caption_engine(
+                model_name=whisper_model(s.model_name, config.profile), device=s.device, compute_type=s.compute_type,
+            )
             for i, s in enumerate(config.steps)
             if isinstance(s, GenerateStep)
         }
@@ -89,13 +92,14 @@ class WorkflowTask(Task[WorkflowConfig]):
                 text = tracks[source]
                 assert text is not None  # validate_workflow rejects dub steps as inputs
             if isinstance(step, TranslateStep):
-                track = self._translate(step, text, ctx)
+                track = self._translate(step, text, ctx, self._dubbed(index))
                 if step.write_output:
                     files += self._write(track, f"_{step.target_lang}", languages, ctx)
             elif isinstance(step, TransliterateStep):
                 ctx.begin("transliterate", "Transliterating...")
                 engine = create_transliteration_engine(
-                    step.engine, source_scheme=step.source_scheme, target_scheme=step.target_scheme,
+                    transliteration_engine(step.engine, self.config.profile, step.source_scheme, step.target_scheme),
+                    source_scheme=step.source_scheme, target_scheme=step.target_scheme,
                 )
                 track = transliterate_track(text, engine, step.source_scheme, step.target_scheme, ctx)
                 if step.write_output:
@@ -124,13 +128,20 @@ class WorkflowTask(Task[WorkflowConfig]):
             ctx.warn("No speech was found, so the transcript is empty.")
         return track
 
-    def _translate(self, step: TranslateStep, text: Track, ctx: RunContext) -> Track:
-        """Translate an earlier step's text, taking its language when the step says auto."""
+    def _dubbed(self, index: int) -> bool:
+        """True when a dub step speaks the text of step `index`."""
+        return any(isinstance(s, DubStep) and step_input_index(s.input) == index for s in self.config.steps)
+
+    def _translate(self, step: TranslateStep, text: Track, ctx: RunContext, for_speech: bool) -> Track:
+        """Translate an earlier step's text, taking its language when the step says auto.
+
+        `for_speech`: a later step dubs this translation, so it is kept about as long to say.
+        """
         ctx.begin("translate", "Translating...")
         source = text.language if step.source_lang == "auto" else step.source_lang
         if not source:
             raise ValueError("The language of this step's input is unknown. Choose its source language.")
-        engine, meaning = create_translator(step.engine, source, step.target_lang, step.meaning_check)
+        engine, meaning = create_translator(step.engine, source, step.target_lang, self.config.profile, for_speech)
         return translate_track(text, engine, source, step.target_lang, ctx, meaning)
 
     def _dub(self, step: DubStep, text: Track, ctx: RunContext) -> tuple[str, str]:
@@ -139,7 +150,7 @@ class WorkflowTask(Task[WorkflowConfig]):
         if not language:
             raise ValueError("The language of this step's input is unknown. Choose the speech language.")
         media = None if is_subtitle(self.config.input_path) else self.config.input_path
-        dubber = Dubber(dub_settings(step), language, media is not None, ctx)
+        dubber = Dubber(dub_settings(step, self.config.profile), language, media is not None, ctx)
         dubber.load(ctx)
         path = dubber.dub(
             Track(cues=text.cues, language=language), media, None, self.config.input_path, self.config.output_dir, ctx,

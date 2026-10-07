@@ -8,7 +8,8 @@ import ctranslate2
 import numpy as np
 from faster_whisper import WhisperModel
 
-from ccgen.config.defaults import AudioDefaults, ComputeDefaults, ModelDefaults, TranscriptionDefaults
+from ccgen.config.defaults import AUTO, AudioDefaults, ComputeDefaults, TranscriptionDefaults
+from ccgen.config.profiles import whisper_model
 from ccgen.core import Segment, WordToken
 from ccgen.engines.captions.base import CaptionEngine
 from ccgen.engines.model_cache import ModelCache
@@ -45,11 +46,11 @@ class WhisperEngine(CaptionEngine):
 
     def __init__(
         self,
-        model_name: str = ModelDefaults.DEFAULT_MODEL,
+        model_name: str = AUTO,
         device: str = ComputeDefaults.DEFAULT_DEVICE,
         compute_type: str = ComputeDefaults.DEFAULT_COMPUTE_TYPE,
     ) -> None:
-        self._model_name = model_name
+        self._model_name = whisper_model(model_name, "")
         self._device = device
         self._compute_type = compute_type
         self._model: Optional[WhisperModel] = None

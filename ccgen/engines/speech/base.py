@@ -19,6 +19,9 @@ ProgressCb = Optional[Callable[[int, int], None]]
 REFERENCE_RATE = 22050
 # Sentence ends in Latin, CJK, Arabic, and Devanagari punctuation, keeping the mark with its sentence.
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？؟।])\s*")
+# Marks that already close a line well enough for speech, and each language's own full stop.
+_CLOSING_PUNCTUATION = ".!?…。！？؟।۔,;:،，、\"')]»”’"
+_FULL_STOPS = {"hi": "।", "ur": "۔", "ja": "。", "zh": "。"}
 
 
 class SpeechEngine(ABC):
@@ -56,6 +59,14 @@ class SpeechEngine(ABC):
         self._device_preference = DubbingDefaults.DEVICE_CPU
         self.load()
 
+    def natural_seconds(self, text: str, speaker: int = 0) -> Optional[float]:
+        """How long `text` will take at normal speed, when the engine can tell before speaking.
+
+        Engines that plan a line's length up front (OmniVoice) let the dub choose the right speed
+        in one pass; the others return None and are sped up after a first take.
+        """
+        return None
+
     def retime(self, text: str, speed: float, speaker: int = 0) -> tuple[np.ndarray, int]:
         """Speak the line just synthesized again at another speed.
 
@@ -75,6 +86,18 @@ class CloningEngine(SpeechEngine):
     @abstractmethod
     def set_speakers(self, references: dict[int, list[np.ndarray]]) -> None:
         """Register each speaker's reference clips (at REFERENCE_RATE) under its speaker id."""
+
+
+def finish_sentence(text: str, language: str) -> str:
+    """End `text` with the language's full stop when it has no closing punctuation.
+
+    Subtitle lines often stop mid-sentence; sampling voices (XTTS-v2) read an unpunctuated
+    ending as unfinished and tend to keep talking, so every line is given a proper ending.
+    """
+    text = text.strip()
+    if not text or text.endswith(tuple(_CLOSING_PUNCTUATION)):
+        return text
+    return text + _FULL_STOPS.get(language, ".")
 
 
 def split_for_speech(text: str, limit: int) -> list[str]:

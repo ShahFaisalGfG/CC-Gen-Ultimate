@@ -44,6 +44,7 @@ class BootThread(QThread):
             self.stage_changed.emit("Preparing interface...", 90)
             import ccgen.controllers.app_ctrl  # noqa: F401
             import ccgen.controllers.assets_ctrl  # noqa: F401
+            import ccgen.controllers.performance_ctrl  # noqa: F401
             import ccgen.controllers.prefs_ctrl  # noqa: F401
             import ccgen.controllers.task_tabs  # noqa: F401
             import ccgen.controllers.workflow_ctrl  # noqa: F401

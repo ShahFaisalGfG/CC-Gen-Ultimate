@@ -8,6 +8,7 @@ import pytest
 from ccgen.config.capabilities import translation_asset_ids
 from ccgen.config.defaults import LanguageOptions
 from ccgen.config.translation_models import (
+    CONCRETE_ENGINE_KEYS,
     ENGINE_KEYS,
     MADLAD_CODES,
     NLLB_CODES,
@@ -23,12 +24,24 @@ _TARGETS = [code for _, code in LanguageOptions.TRANSLATION_TARGETS]
 
 
 class TestCatalog:
-    @pytest.mark.parametrize("engine", ["opus_mt", "nllb", "madlad"])
+    @pytest.mark.parametrize("engine", ["nllb", "madlad", "hymt2"])
     def test_every_offered_pair_has_a_route(self, engine):
         for source in _SOURCES:
             for target in _TARGETS:
                 if source != target:
                     assert route(engine, source, target), (engine, source, target)
+
+    def test_opus_mt_covers_every_pair_but_korean_and_cjk_targets(self):
+        gaps = {"ja", "ko", "zh"}
+        for source in _SOURCES:
+            for target in _TARGETS:
+                if source == target:
+                    continue
+                if source == "ko" or target in gaps:
+                    with pytest.raises(ValueError, match="OPUS-MT has no model"):
+                        route("opus_mt", source, target)
+                else:
+                    assert route("opus_mt", source, target), (source, target)
 
     def test_opus_mt_goes_through_english_only_when_needed(self):
         assert route("opus_mt", "en", "ur") == [("en", "ur")]
@@ -41,7 +54,7 @@ class TestCatalog:
         assert set(_SOURCES) | set(_TARGETS) <= set(NLLB_CODES) == set(MADLAD_CODES)
 
     def test_shared_models_are_downloaded_once(self):
-        assert [m.key for m in models_for("opus_mt", "hi", "ur")] == ["opus_mt-iir-en", "opus_mt-en-iir"]
+        assert [m.key for m in models_for("opus_mt", "hi", "ur")] == ["opus_mt-inc-en", "opus_mt-en-iir"]
 
     def test_asset_ids_follow_the_engine(self):
         assert translation_asset_ids("en", "ur", "opus_mt") == ["translation:opus_mt-en-iir"]
@@ -50,7 +63,8 @@ class TestCatalog:
         assert translation_asset_ids("en", "ur", "argos") == ["translation:en-ur"]
 
     def test_engine_keys_are_the_settings_choices(self):
-        assert ENGINE_KEYS[0] == "opus_mt" and set(ENGINE_KEYS) == {"opus_mt", "nllb", "madlad", "argos"}
+        assert ENGINE_KEYS[0] == "auto" and set(ENGINE_KEYS) == {"auto", "opus_mt", "hymt2", "nllb", "madlad", "argos"}
+        assert "auto" not in CONCRETE_ENGINE_KEYS
 
 
 class _FakeTokenizer:
@@ -93,7 +107,7 @@ class _PreferLast:
     def ensure(self, status_cb=None, progress_cb=None):
         pass
 
-    def choose(self, sources, candidates, target):
+    def choose(self, sources, candidates, target, spoken_from=None):
         return [(options[-1], 0.9) for options in candidates]
 
 
@@ -187,6 +201,38 @@ class TestMeaningCheck:
     def test_lost_terms_and_odd_lengths_are_penalised(self):
         assert fidelity._penalty("Open our GitHub page", "ہمارا صفحہ کھولیں", "ur") == pytest.approx(fidelity._LOST_TERM_PENALTY)
         assert fidelity._penalty("A long sentence about many things", "ہاں", "ur") >= fidelity._LENGTH_PENALTY
+
+
+class _ScoredMeaning(fidelity.MeaningCheck):
+    """Meaning check stand-in with a fixed score per candidate."""
+
+    def __init__(self, scores: dict[str, float]) -> None:
+        super().__init__()
+        self._fixed = scores
+
+    def scores(self, sources, translations, target):
+        return [self._fixed[t] for t in translations]
+
+
+class TestSpeechLength:
+    # English source: 20 characters at 0.0721 s each is about 1.44 s of speech.
+    SOURCE = "a" * 20
+
+    def test_a_dubbed_translation_prefers_a_similar_speaking_time_among_faithful_candidates(self):
+        long, fitting = "b" * 40, "c" * 18  # Urdu at 0.0781 s/char: about 3.1 s and 1.4 s
+        check = _ScoredMeaning({long: 0.90, fitting: 0.88})
+        assert check.choose([self.SOURCE], [[long, fitting]], "ur")[0][0] == long
+        assert check.choose([self.SOURCE], [[long, fitting]], "ur", spoken_from="en")[0][0] == fitting
+
+    def test_meaning_still_comes_first(self):
+        long, fitting = "b" * 40, "c" * 18
+        check = _ScoredMeaning({long: 0.90, fitting: 0.70})
+        assert check.choose([self.SOURCE], [[long, fitting]], "ur", spoken_from="en")[0][0] == long
+
+    def test_every_dubbing_language_has_a_speaking_rate(self):
+        from ccgen.config.defaults import DubbingDefaults
+
+        assert {code for _, code in DubbingDefaults.LANGUAGES} <= set(fidelity.SECONDS_PER_CHAR)
 
 
 class TestModelFiles:

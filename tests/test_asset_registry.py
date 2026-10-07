@@ -67,16 +67,17 @@ class TestListAssets:
         assert len(whisper) == 6
         by_engine = {e: sum(a["engine"] == e for a in translation) for e in {a["engine"] for a in translation}}
         assert by_engine == {
-            "OPUS-MT (recommended)": 19,  # one model per English direction (some serve two languages)
+            "OPUS-MT": 17,  # one model per English direction (some serve two languages)
             "NLLB-200 1.3B": 1,
             "MADLAD-400 3B": 1,
+            "Hy-MT2 1.8B": 1,
             "Meaning check": 1,
-            "Argos Translate": 18,  # each of the 9 non-English targets, to and from English
+            "Argos Translate": 24,  # each of the 12 non-English targets, to and from English
         }
-        # The recommended engine's models come first in the tab.
-        assert translation[0]["engine"] == "OPUS-MT (recommended)"
+        # OPUS-MT, which Automatic uses for most pairs, comes first in the tab.
+        assert translation[0]["engine"] == "OPUS-MT"
         assert len(translit) == 3
-        assert {a["engine"] for a in voices} == {"XTTS-v2 (voice cloning)", "Kokoro", "Piper"}
+        assert {a["engine"] for a in voices} == {"OmniVoice (voice cloning)", "XTTS-v2 (voice cloning)", "Kokoro", "Piper"}
         assert sum(a["engine"] == "Piper" for a in voices) > 50
         assert all(a["downloaded"] is False and a["size_bytes"] is None for a in assets)
 

@@ -28,7 +28,9 @@ ComboBox {
     }
 
     onValueChanged: control._sync()
-    onCountChanged: control._sync()
+    // A new model resets the selection after these handlers run, so re-select once it settles.
+    onModelChanged: Qt.callLater(control._sync)
+    onCountChanged: Qt.callLater(control._sync)
     Component.onCompleted: control._sync()
 
     function _badge(code) {

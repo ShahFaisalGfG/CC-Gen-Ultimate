@@ -8,7 +8,7 @@ import re
 from typing import Optional
 
 from ccgen.config.defaults import LanguageOptions, ModelRepos, TransliterationDefaults
-from ccgen.config.translation_models import ENGINE_ARGOS, models_for
+from ccgen.config.translation_models import ENGINE_ARGOS, ENGINE_HYMT, HYMT_MODEL, models_for
 
 _SCHEME_CODES = frozenset(code for _, code in TransliterationDefaults.SCHEMES)
 # Punjabi has no direct neural model; the neural engine pivots it through Devanagari to reach
@@ -45,12 +45,14 @@ def neural_model_key(source: str, target: str) -> Optional[str]:
 def translation_asset_ids(source: str, target: str, engine: str = ENGINE_ARGOS) -> list[str]:
     """Manage Models ids of what `engine` needs to translate source→target ("" source: not known yet).
 
-    Argos needs a package per direction (via English when needed). NLLB and MADLAD need their
-    one model whatever the pair; OPUS-MT needs the models on its route, and with the source not
-    known yet, the model from English into the target.
+    Argos needs a package per direction (via English when needed). NLLB, MADLAD, and Hy-MT2 need
+    their one model whatever the pair; OPUS-MT needs the models on its route, and with the source
+    not known yet, the model from English into the target.
     """
     if source == target or not target:
         return []
+    if engine == ENGINE_HYMT:
+        return [f"translation:{HYMT_MODEL.key}"]
     if engine == ENGINE_ARGOS:
         if not source:
             return []
