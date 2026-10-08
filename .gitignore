@@ -26,6 +26,9 @@ __pycache__/
 # ── Runtime output ────────────────────────────────────────────────────────────
 logs/
 *.log
+# Preferences written when running from source (installed builds use %APPDATA%); the defaults
+# live in ccgen/config/defaults.py.
+ccgen/utils/settings.json
 
 # ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
