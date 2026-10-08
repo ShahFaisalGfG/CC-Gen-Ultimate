@@ -8,16 +8,31 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ccgen.engines import devices
-from ccgen.engines.devices import Accelerator, first_working, onnx_accelerators, torch_accelerators
+from ccgen.engines.devices import (
+    Accelerator,
+    arch_supported,
+    ct2_open,
+    cuda_gpu,
+    first_working,
+    onnx_accelerators,
+    torch_accelerators,
+    torch_edition,
+)
+
+_GB = 1024 ** 3
 
 
-def _fake_torch(cuda=False, hip=None, xpu=False, mps=False):
+def _fake_torch(cuda=False, hip=None, xpu=False, mps=False, capability=(8, 6), vram_gb=12,
+                arches="sm_61 sm_70 sm_75 sm_80 sm_86 sm_90 sm_100 sm_120", cuda_version="12.8"):
     """Build a stand-in torch module reporting the given accelerators."""
     torch = MagicMock()
     torch.device.side_effect = lambda name: f"device:{name}"
     torch.cuda.is_available.return_value = cuda
-    torch.cuda.get_device_name.return_value = "Card"
-    torch.version = SimpleNamespace(hip=hip)
+    torch.cuda.get_device_properties.return_value = SimpleNamespace(
+        name="Card", major=capability[0], minor=capability[1], total_memory=vram_gb * _GB,
+    )
+    torch._C._cuda_getArchFlags.return_value = arches
+    torch.version = SimpleNamespace(hip=hip, cuda=cuda_version, xpu=None)
     torch.xpu.is_available.return_value = xpu
     torch.xpu.get_device_name.return_value = "Arc"
     torch.backends.mps.is_available.return_value = mps
@@ -50,6 +65,10 @@ class TestTorchAccelerators:
         with patch.dict(sys.modules, {"torch": _fake_torch(cuda=True)}):
             assert [a.label for a in torch_accelerators("cpu")] == ["CPU"]
 
+    def test_a_gpu_this_build_has_no_code_for_is_skipped(self, no_directml):
+        with patch.dict(sys.modules, {"torch": _fake_torch(cuda=True, capability=(5, 0))}):
+            assert [a.label for a in torch_accelerators()] == ["CPU"]
+
     def test_directml_is_used_when_installed(self):
         dml = MagicMock()
         dml.is_available.return_value = True
@@ -57,6 +76,76 @@ class TestTorchAccelerators:
         with patch.dict(sys.modules, {"torch": _fake_torch(), "torch_directml": dml}):
             labels = [a.label for a in torch_accelerators()]
         assert labels == ["GPU (DirectML): Radeon", "CPU"]
+
+
+class TestCudaGpu:
+    @pytest.mark.parametrize("capability, arches, supported", [
+        ((5, 0), ["sm_61", "sm_86", "sm_120"], False),   # a GeForce 940MX on the standard build
+        ((5, 0), ["sm_50", "sm_60", "sm_86"], True),     # ... and on the Legacy NVIDIA build
+        ((8, 9), ["sm_50", "sm_86"], True),               # RTX 40 runs the 8.6 code
+        ((12, 0), ["sm_50", "sm_86", "sm_90"], False),    # RTX 50 needs the standard build
+        ((12, 0), ["sm_90", "compute_90"], True),         # ... unless the build carries PTX
+        ((7, 5), [], True),                                # a build that doesn't say is tried
+    ])
+    def test_arch_supported(self, capability, arches, supported):
+        assert arch_supported(capability, arches) is supported
+
+    def test_old_gpu_on_the_standard_build_names_the_legacy_edition(self):
+        with patch.dict(sys.modules, {"torch": _fake_torch(cuda=True, capability=(5, 0), vram_gb=2)}):
+            gpu = cuda_gpu()
+        assert gpu is not None and not gpu.usable and gpu.note == "needs the Legacy NVIDIA edition"
+
+    def test_rtx_50_on_the_legacy_build_names_the_standard_edition(self):
+        torch = _fake_torch(cuda=True, capability=(12, 0), arches="sm_50 sm_60 sm_86 sm_90", cuda_version="12.6")
+        with patch.dict(sys.modules, {"torch": torch}):
+            gpu = cuda_gpu()
+        assert gpu is not None and gpu.note == "needs the standard edition"
+
+    @pytest.mark.parametrize("capability, vram_gb, strong", [((8, 6), 12, True), ((8, 6), 6, False), ((5, 0), 2, False)])
+    def test_only_a_new_large_gpu_skips_timing(self, capability, vram_gb, strong):
+        arches = "sm_50 sm_86"
+        with patch.dict(sys.modules, {"torch": _fake_torch(cuda=True, capability=capability, vram_gb=vram_gb, arches=arches)}):
+            gpu = cuda_gpu()
+        assert gpu is not None and gpu.strong is strong
+
+    @pytest.mark.parametrize("cuda_version, edition", [("12.8", "cuda"), ("12.6", "legacy"), (None, "cpu")])
+    def test_edition_follows_the_installed_build(self, cuda_version, edition):
+        with patch.dict(sys.modules, {"torch": _fake_torch(cuda_version=cuda_version)}):
+            assert torch_edition() == edition
+
+
+class TestCt2Open:
+    def _open(self, gpu_type, speeds, compute_type="auto", key="model"):
+        opened = []
+
+        def open_model(device, kind):
+            opened.append((device, kind))
+            return device
+
+        def probe(device):
+            time.sleep(speeds[device])
+
+        with patch.object(devices, "ct2_gpu_compute_type", return_value=gpu_type):
+            result = ct2_open(key, open_model, probe, compute_type)
+        return result, opened
+
+    def test_without_a_gpu_the_cpu_runs_int8(self):
+        assert self._open(None, {})[0] == ("cpu", "cpu", "int8")
+
+    def test_a_reduced_precision_gpu_is_used_without_timing(self):
+        (_, device, kind), opened = self._open("float16", {"cuda": 0.0, "cpu": 0.0})
+        assert (device, kind) == ("cuda", "float16") and opened == [("cuda", "float16")]
+
+    def test_a_float32_only_gpu_loses_to_a_faster_cpu_and_is_remembered(self):
+        devices._fastest_ct2.clear()
+        (_, device, _), _ = self._open("float32", {"cuda": 0.03, "cpu": 0.0}, key="old-gpu")
+        assert device == "cpu"
+        (_, device, _), opened = self._open("float32", {"cuda": 0.0, "cpu": 0.0}, key="old-gpu")
+        assert device == "cpu" and opened == [("cpu", "int8")]
+
+    def test_an_explicit_compute_type_skips_timing(self):
+        (_, device, kind), _ = self._open("float32", {"cuda": 0.03, "cpu": 0.0}, compute_type="float16")
+        assert (device, kind) == ("cuda", "float16")
 
 
 class TestOnnxAccelerators:

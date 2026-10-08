@@ -61,7 +61,7 @@ class TestLoad:
         WhisperEngine(model_name="tiny", device="cpu", compute_type="int8").load()
         assert mock_model_cls.call_count == 3
 
-    @patch("ccgen.engines.captions.whisper_engine._cuda_device_count", return_value=1)
+    @patch("ccgen.engines.devices.ct2_gpu_compute_type", return_value="float16")
     @patch("ccgen.engines.captions.whisper_engine.download_progress")
     @patch("ccgen.engines.captions.whisper_engine.WhisperModel")
     def test_auto_device_falls_back_to_cpu_when_gpu_fails(self, mock_model_cls, mock_download_progress, _):
@@ -78,7 +78,7 @@ class TestLoad:
         assert mock_model_cls.call_args_list[1].kwargs == {"device": "cpu", "compute_type": "int8"}
         assert messages[-1] == "Model ready (CPU)."
 
-    @patch("ccgen.engines.captions.whisper_engine._cuda_device_count", return_value=1)
+    @patch("ccgen.engines.captions.whisper_engine.ct2_gpu_compute_type", return_value="float16")
     @patch("ccgen.engines.captions.whisper_engine.download_progress")
     @patch("ccgen.engines.captions.whisper_engine.WhisperModel")
     def test_explicit_cuda_failure_is_not_hidden(self, mock_model_cls, mock_download_progress, _):
@@ -96,13 +96,17 @@ class TestLoad:
 
 
 class TestResolveCompute:
-    @patch("ccgen.engines.captions.whisper_engine._cuda_device_count", return_value=0)
+    @patch("ccgen.engines.captions.whisper_engine.ct2_gpu_compute_type", return_value=None)
     def test_auto_without_gpu_uses_cpu_int8(self, _):
         assert resolve_compute("auto", "auto") == ("cpu", "int8")
 
-    @patch("ccgen.engines.captions.whisper_engine._cuda_device_count", return_value=2)
+    @patch("ccgen.engines.captions.whisper_engine.ct2_gpu_compute_type", return_value="float16")
     def test_auto_with_gpu_uses_cuda_float16(self, _):
         assert resolve_compute("auto", "auto") == ("cuda", "float16")
+
+    @patch("ccgen.engines.captions.whisper_engine.ct2_gpu_compute_type", return_value="float32")
+    def test_an_older_gpu_runs_float32(self, _):
+        assert resolve_compute("cuda", "auto") == ("cuda", "float32")
 
     def test_explicit_values_pass_through(self):
         assert resolve_compute("cpu", "float32") == ("cpu", "float32")

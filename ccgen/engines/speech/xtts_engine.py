@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import Xtts
 
-from ccgen.engines.devices import Accelerator, first_working, torch_accelerators
+from ccgen.engines.devices import Accelerator, first_working, release_gpu_memory, torch_accelerators
 from ccgen.engines.model_cache import ModelCache
 from ccgen.engines.speech.base import (
     REFERENCE_RATE,
@@ -164,12 +164,19 @@ class XttsEngine(CloningEngine):
 
 
 def _place(model: Xtts, accelerator: Accelerator) -> Xtts:
-    """Move the model to a device and, for a GPU, prove it can speak there."""
-    model.to(accelerator.handle)
-    if accelerator.is_gpu:
-        with torch.inference_mode():
-            noise = (torch.rand(1, REFERENCE_RATE, device=accelerator.handle) - 0.5) * 0.1
-            latent = model.get_gpt_cond_latents(noise, REFERENCE_RATE)
-            embedding = model.get_speaker_embedding(noise, REFERENCE_RATE)
-            model.inference(_WARMUP_TEXT, "en", latent, embedding)
+    """Move the model to a device and, for a GPU, prove it can speak there. A failed GPU
+    attempt hands the model back to the CPU and releases the GPU's memory."""
+    try:
+        model.to(accelerator.handle)
+        if accelerator.is_gpu:
+            with torch.inference_mode():
+                noise = (torch.rand(1, REFERENCE_RATE, device=accelerator.handle) - 0.5) * 0.1
+                latent = model.get_gpt_cond_latents(noise, REFERENCE_RATE)
+                embedding = model.get_speaker_embedding(noise, REFERENCE_RATE)
+                model.inference(_WARMUP_TEXT, "en", latent, embedding)
+    except Exception:
+        if accelerator.is_gpu:
+            model.to("cpu")
+            release_gpu_memory()
+        raise
     return model

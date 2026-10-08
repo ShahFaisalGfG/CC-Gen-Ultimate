@@ -17,13 +17,14 @@ the two workflows by hand from the **Actions** tab afterward if you want to test
 
 ## What `build-release.yml` checks
 
-The workflow builds twice, once per GPU edition: `cuda` (NVIDIA, the main release with the plain
-file names that `winget-release.yml` submits) and `xpu` (Intel Arc and Core Ultra, file names with
-an `_intel_gpu` suffix). Each build installs its PyTorch and the DirectML ONNX Runtime with
+The workflow builds three times, once per GPU edition: `cuda` (NVIDIA GTX 10 series to RTX 50, the
+main release with the plain file names that `winget-release.yml` submits), `legacy` (older NVIDIA
+GPUs such as the GTX 900 series and GeForce 940MX, file names with a `_nvidia_legacy` suffix), and
+`xpu` (Intel Arc and Core Ultra, file names with an `_intel_gpu` suffix). Each build installs its PyTorch and the DirectML ONNX Runtime with
 `Install-GpuRuntime` from `scripts/bundle.ps1`.
 
-Before anything is published, the `cuda` build runs the test suite and `pyright`, and both builds
-bundle the app with the same PyInstaller options as the local scripts (`scripts/bundle.ps1`), then
-run the installer bundle and the portable exe with `--self-test`. A missing module, DLL, data file,
+Before anything is published, the `cuda` build runs the test suite and `pyright`, and every build
+bundles the app with the same PyInstaller options as the local scripts (`scripts/bundle.ps1`), then
+runs the installer bundle and the portable exe with `--self-test`. A missing module, DLL, data file,
 speech dictionary, or QML plugin fails the workflow with a PASS/FAIL report in the log. The release
-job publishes one GitHub Release with both editions' files only after both builds pass.
+job publishes one GitHub Release with every edition's files only after all builds pass.

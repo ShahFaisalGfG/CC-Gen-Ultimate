@@ -128,12 +128,14 @@ class TestLicences:
 
 
 class TestHardware:
-    def _detect(self, cuda=None, xpu=None, dml=False, cores=4, ram_gb=16):
+    def _detect(self, cuda=None, xpu=None, dml=False, cores=4, ram_gb=16, arches="sm_61 sm_86 sm_120"):
         from ccgen.engines import hardware
 
         torch = SimpleNamespace(
             cuda=SimpleNamespace(is_available=lambda: cuda is not None, get_device_properties=lambda i: cuda),
             xpu=SimpleNamespace(is_available=lambda: xpu is not None, get_device_properties=lambda i: xpu),
+            version=SimpleNamespace(hip=None),
+            _C=SimpleNamespace(_cuda_getArchFlags=lambda: arches),
         )
         ort = SimpleNamespace(get_available_providers=lambda: ["DmlExecutionProvider"] if dml else [])
         memory = SimpleNamespace(total=ram_gb * 1024 ** 3)
@@ -145,9 +147,17 @@ class TestHardware:
             return hardware.detect()
 
     def test_nvidia_gpu_memory_decides(self):
-        gpu = SimpleNamespace(name="NVIDIA RTX 4070", total_memory=12 * 1024 ** 3)
+        gpu = SimpleNamespace(name="NVIDIA RTX 4070", total_memory=12 * 1024 ** 3, major=8, minor=9)
         profile = self._detect(cuda=gpu, cores=8, ram_gb=32)
         assert (profile.recommended, profile.summary) == ("quality", "NVIDIA RTX 4070 (12 GB), 32 GB RAM, 8 CPU cores")
+
+    def test_an_nvidia_gpu_this_edition_cant_run_is_named_with_its_edition(self):
+        gpu = SimpleNamespace(name="NVIDIA GeForce 940MX", total_memory=2 * 1024 ** 3, major=5, minor=0)
+        profile = self._detect(cuda=gpu)
+        assert profile.vram_gb == 0.0 and profile.recommended == "light"
+        assert profile.summary == ("NVIDIA GeForce 940MX (needs the Legacy NVIDIA edition), 16 GB RAM, "
+                                   "4 CPU cores")
+        assert self._detect(cuda=gpu, arches="sm_50 sm_60 sm_86").vram_gb == 2.0  # the Legacy build
 
     def test_directml_gpu_is_named_but_not_counted(self):
         profile = self._detect(dml=True)

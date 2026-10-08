@@ -85,6 +85,19 @@ class TestApplyProfile:
         ctrl, _ = controller(_performance())
         assert [p["code"] for p in ctrl.profileOptions][-1] == "custom"
 
+    def test_a_gpu_this_edition_cant_run_is_named_with_its_edition(self, controller):
+        old_gpu = HardwareProfile(gpu="NVIDIA GeForce 940MX", vram_gb=0.0, ram_gb=16.0, physical_cores=4,
+                                  gpu_note="needs the Legacy NVIDIA edition")
+        ctrl, notices = controller(_performance())
+        ctrl._on_detected(old_gpu)
+        assert notices[0].startswith("CC-Gen chose the Light profile")
+        assert notices[0].endswith("The NVIDIA GeForce 940MX needs the Legacy NVIDIA edition of CC-Gen-Ultimate; "
+                                   "this one uses the CPU.")
+        ctrl._api.settings["performance"] = _performance("light", "light", old_gpu.fingerprint)
+        notices.clear()
+        ctrl._on_detected(old_gpu)
+        assert notices == []  # said once, until the hardware changes
+
     def test_failed_detection_changes_nothing(self, controller):
         ctrl, notices = controller(_performance())
         ctrl._on_detected(None)

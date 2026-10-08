@@ -109,7 +109,7 @@ def _check_speech_engines() -> None:
     from piper.phonemize_espeak import EspeakPhonemizer
     from TTS.tts.models.xtts import Xtts  # noqa: F401
 
-    from ccgen.engines.devices import describe_accelerators
+    from ccgen.engines.devices import EDITION_LABELS, built_architectures, describe_accelerators, torch_edition
     from ccgen.engines.hardware import detect
     from ccgen.engines.speech.omnivoice.audio import remove_silence
     from ccgen.engines.speech.omnivoice.model import OmniVoice  # noqa: F401
@@ -125,6 +125,8 @@ def _check_speech_engines() -> None:
     tone = (0.3 * np.sin(np.arange(16000) * 0.05)).astype(np.float32)[None, :]
     if remove_silence(tone, 16000).shape[-1] == 0:
         raise RuntimeError("OmniVoice's silence trimming removed speech")
+    architectures = " ".join(built_architectures()) or "none"
+    print(f"    edition: {EDITION_LABELS[torch_edition()]} (GPU architectures: {architectures})")
     for runtime, devices in describe_accelerators().items():
         print(f"    {runtime}: {', '.join(devices)}")
     hardware = detect()

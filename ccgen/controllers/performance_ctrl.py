@@ -4,7 +4,8 @@
 # yet), the recommended profile is applied and a one-time note says so. When the hardware later
 # changes, the new recommendation replaces the profile only if the user never chose one by hand
 # (the saved profile is still the previous recommendation); otherwise the note only suggests it.
-# A Custom profile is kept; its Automatic choices follow the new recommendation.
+# A Custom profile is kept; its Automatic choices follow the new recommendation. The same note
+# names the edition that can use a GPU this edition can't, such as an older NVIDIA card.
 
 import logging
 from typing import Any
@@ -97,19 +98,24 @@ class PerformanceController(QObject):
         }
         changed = performance.get("hardware_id") != hardware.fingerprint
         label = profile_info(recommended).label
+        messages: list[str] = []
         if not current:
             values["performance.profile"] = recommended
-            self.notice.emit(f"CC-Gen chose the {label} profile for this PC. Change it in Preferences > Performance.")
+            messages.append(f"CC-Gen chose the {label} profile for this PC. Change it in Preferences > Performance.")
         elif changed and current == PROFILE_CUSTOM:
-            self.notice.emit(f"This PC's hardware changed; Automatic choices in your Custom profile now "
-                             f"follow the {label} profile.")
+            messages.append(f"This PC's hardware changed; Automatic choices in your Custom profile now "
+                            f"follow the {label} profile.")
         elif changed and current != recommended:
             if current == performance.get("recommended"):
                 values["performance.profile"] = recommended
-                self.notice.emit(f"This PC's hardware changed, so CC-Gen switched to the {label} profile.")
+                messages.append(f"This PC's hardware changed, so CC-Gen switched to the {label} profile.")
             else:
-                self.notice.emit(f"This PC's hardware changed; the {label} profile now suits it best "
-                                 "(Preferences > Performance).")
+                messages.append(f"This PC's hardware changed; the {label} profile now suits it best "
+                                "(Preferences > Performance).")
+        if hardware.gpu_note and (not current or changed):
+            messages.append(f"The {hardware.gpu} {hardware.gpu_note} of CC-Gen-Ultimate; this one uses the CPU.")
+        if messages:
+            self.notice.emit(" ".join(messages))
         if values != {key: performance.get(key.split(".")[1]) for key in values}:
             self._api.patch("/settings", {"values": values}, self._on_saved)
 

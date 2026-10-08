@@ -99,7 +99,8 @@ class ComputeDefaults:
     """CTranslate2 device and compute type defaults.
 
     "auto" picks an NVIDIA GPU when CUDA is usable and falls back to the CPU otherwise; the
-    "auto" compute type resolves to float16 on a GPU and int8 on a CPU.
+    "auto" compute type resolves to the GPU's fastest type (float32 on older GPUs, which are
+    timed against the CPU first) and int8 on a CPU.
     """
 
     DEVICE_AUTO = "auto"

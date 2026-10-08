@@ -21,14 +21,15 @@ permissions:
   contents: write
 
 jobs:
-  # One build per GPU vendor: an installer can carry only one PyTorch build (see scripts/bundle.ps1).
-  # "cuda" is the main release (NVIDIA); "xpu" is the Intel GPU edition, named with "_intel_gpu".
+  # One build per GPU family: an installer can carry only one PyTorch build (see scripts/bundle.ps1).
+  # "cuda" is the main release (NVIDIA); "legacy" is the edition for older NVIDIA GPUs, named with
+  # "_nvidia_legacy"; "xpu" is the Intel GPU edition, named with "_intel_gpu".
   build:
     runs-on: windows-latest
     strategy:
       fail-fast: true
       matrix:
-        gpu: [cuda, xpu]
+        gpu: [cuda, legacy, xpu]
 
     steps:
       - name: Checkout

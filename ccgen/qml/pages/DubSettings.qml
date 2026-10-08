@@ -171,7 +171,7 @@ ColumnLayout {
 
         FormRow {
             label: "Run on"
-            hint: "Automatic times Kokoro and Piper on each GPU and the CPU and keeps the fastest. OmniVoice and XTTS-v2 use the first GPU that works, or the CPU."
+            hint: "Automatic times Kokoro and Piper on each GPU and the CPU and keeps the fastest. OmniVoice uses a strong GPU straight away and times a smaller one against the CPU; XTTS-v2 uses the first GPU that works."
             StyledComboBox {
                 Layout.fillWidth: true
                 accessibleName: "Dubbing device"

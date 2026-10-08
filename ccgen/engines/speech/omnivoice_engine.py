@@ -13,7 +13,14 @@ from typing import Any, Optional
 import numpy as np
 import torch
 
-from ccgen.engines.devices import Accelerator, first_working, torch_accelerators
+from ccgen.engines.devices import (
+    Accelerator,
+    cuda_gpu,
+    fastest_working,
+    first_working,
+    release_gpu_memory,
+    torch_accelerators,
+)
 from ccgen.engines.model_cache import ModelCache
 from ccgen.engines.speech.base import REFERENCE_RATE, CloningEngine, ProgressCb, StatusCb, finish_sentence
 from ccgen.engines.speech.line_check import load_transcriber
@@ -46,6 +53,10 @@ _FADE_S = 0.02
 _TAIL_S = 0.3
 _WHISPER_RATE = 16000
 _WARMUP_TEXT = "Hello."
+# GPU memory a line needs besides the weights (activations for both guidance passes, the CUDA
+# context's working space). With less free than the weights plus this, the audio codec stays on
+# the CPU and only the backbone, which does almost all the work, runs on the GPU.
+_GPU_HEADROOM_BYTES = 600 * 1024 ** 2
 
 
 class OmniVoiceEngine(CloningEngine):
@@ -64,8 +75,7 @@ class OmniVoiceEngine(CloningEngine):
             folder = ensure_omnivoice(progress_cb)
             emit_status(status_cb, "Loading OmniVoice...")
             model = OmniVoice.from_pretrained(folder, dtype=torch.float32)
-            model, accelerator = first_working(torch_accelerators(self._device_preference), lambda a: _place(model, a))
-            return model, accelerator.label
+            return model, _settle(model, torch_accelerators(self._device_preference)).label
 
         self._model, self.device_label = _models.get_or_load(self._device_preference, loader)
         self._config = OmniVoiceGenerationConfig(num_step=self.steps)
@@ -124,15 +134,79 @@ class OmniVoiceEngine(CloningEngine):
         return spell_numbers(spoken, self.voice.language) if spells_numbers(self.voice.language) else spoken
 
 
+def _settle(model: Any, accelerators: list[Accelerator]) -> Accelerator:
+    """Place the model on the device it runs best on and return that device.
+
+    A strong NVIDIA GPU is used straight away. Any other GPU (an older or smaller NVIDIA card,
+    Intel, Apple, DirectML) is timed against the CPU on a short line and used only when faster.
+    """
+    gpus = [a for a in accelerators if a.is_gpu]
+    gpu = cuda_gpu() if gpus and gpus[0].label.startswith(("NVIDIA", "AMD")) else None
+    if not gpus or (gpu is not None and gpu.strong):
+        return first_working(accelerators, lambda a: _place(model, a))[1]
+    # The CPU goes first, so a winning GPU (tried last) keeps the model without a second move.
+    order = accelerators[-1:] + gpus
+    placed: list[Accelerator] = []
+
+    def place(accelerator: Accelerator) -> Any:
+        _place(model, accelerator)
+        placed.append(accelerator)
+        return model
+
+    _, best = fastest_working(order, place, _warm_up)
+    if placed[-1] != best:
+        _place(model, best)
+    return best
+
+
 def _place(model: Any, accelerator: Accelerator) -> Any:
-    """Move the model to a device (half precision on a GPU) and prove it can speak there."""
-    model.to(accelerator.handle)
-    if accelerator.is_gpu:
+    """Move the model to a device and prove it can speak there.
+
+    On a GPU the backbone runs in half precision, converted before the move so the GPU never
+    holds the full-precision weights; the audio codec stays in full precision, as upstream runs
+    it, on the GPU when its memory has room and on the CPU otherwise. A failed GPU attempt hands
+    the model back to the CPU in full precision and releases the GPU's memory.
+    """
+    codec = model.audio_tokenizer
+    if not accelerator.is_gpu:
+        model.to("cpu")
+        model.float()
+        return model
+    try:
         model.half()
-        model.audio_tokenizer.float()  # the audio codec stays in full precision, as upstream runs it
-        with torch.inference_mode():
-            model.generate(text=_WARMUP_TEXT, language="en", num_step=2)
+        codec.float()
+        codec_on_gpu = _codec_fits(model, accelerator)
+        if not codec_on_gpu:
+            model.audio_tokenizer = None  # detached so the move leaves it on the CPU
+        model.to(accelerator.handle)
+        model.audio_tokenizer = codec
+        _log.info("OmniVoice on %s, audio codec on the %s", accelerator.label, "GPU" if codec_on_gpu else "CPU")
+        _warm_up(model)
+    except Exception:
+        model.audio_tokenizer = codec
+        model.to("cpu")
+        model.float()
+        release_gpu_memory()
+        raise
     return model
+
+
+def _codec_fits(model: Any, accelerator: Accelerator) -> bool:
+    """True when the GPU has room for the whole model, codec included, with working space left.
+
+    Only CUDA reports its free memory; other GPUs keep the codec with the backbone, as before.
+    """
+    if getattr(accelerator.handle, "type", None) != "cuda":
+        return True
+    free, _ = torch.cuda.mem_get_info()
+    weights = sum(p.numel() * p.element_size() for p in model.parameters())
+    return free >= weights + _GPU_HEADROOM_BYTES
+
+
+def _warm_up(model: Any) -> None:
+    """Speak a short line, proving the device runs the model (and timing it when compared)."""
+    with torch.inference_mode():
+        model.generate(text=_WARMUP_TEXT, language="en", num_step=2)
 
 
 def _load_vectors() -> tuple[Any, Any]:

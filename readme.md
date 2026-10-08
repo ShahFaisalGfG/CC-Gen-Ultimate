@@ -83,7 +83,7 @@ Most auto-captioning tools are cloud services in disguise: upload your file, wai
 - 🔀 **Two transliteration engines** - a fast rule-based converter and an optional neural engine for higher-quality output, your choice
 - 🗣️ **Dubbing with voice cloning** - speak translated subtitles in each original speaker's voice with native pronunciation in all 13 languages, Urdu included (OmniVoice), or with XTTS-v2, natural Kokoro, or light Piper voices, added to the video as a new audio track
 - 🖥️ **Tuned to your PC** - a performance profile, recommended from your GPU, memory, and processor, picks the best models a PC runs well: the largest on a strong NVIDIA GPU, lighter ones on an ordinary laptop
-- ⚡ **Uses your GPU** - NVIDIA, AMD, Intel, and Apple Silicon GPUs speed up dubbing; Kokoro and Piper voices run on whichever device is fastest, voice cloning runs on the first GPU that works, and the CPU takes over if a GPU can't run a voice
+- ⚡ **Uses your GPU** - NVIDIA, AMD, Intel, and Apple Silicon GPUs speed up dubbing; Kokoro and Piper voices run on whichever device is fastest, OmniVoice uses a strong GPU straight away and times a smaller one against the CPU, and the CPU takes over if a GPU can't run a voice
 - 🎨 **Modern, clean UI** - PySide6 + QML with System, Light, and Dark themes
 - 📦 **Two install modes** - system-wide and per-user (no admin required)
 - 📺 **Live progress** - watch each subtitle and its translation appear as it's produced, no black-box waiting
@@ -131,7 +131,15 @@ Once published, installers will be available on the [Releases](https://github.co
 | `CC-Gen-Ultimate_<version>_system_installer.exe` | ✅ | Shared / corporate machines |
 | `CC-Gen-Ultimate_<version>_user_installer.exe` | ❌ | Personal machines - recommended |
 
-Each installer also comes as an **Intel GPU edition** (`..._intel_gpu_..._installer.exe`) that runs speech recognition and voice cloning on Intel Arc and Core Ultra graphics. The standard edition uses NVIDIA GPUs for those. Both editions run Piper and Kokoro voices on any DirectX 12 GPU (NVIDIA, AMD, or Intel), and everything falls back to the CPU when no GPU is available.
+Each installer comes in three editions, which differ only in the GPUs that speech recognition and voice cloning can use:
+
+| Edition | File names | GPUs for speech recognition and voice cloning |
+|---|---|---|
+| Standard | `..._installer.exe` | NVIDIA GeForce GTX 10 series up to RTX 50 |
+| Legacy NVIDIA | `..._nvidia_legacy_..._installer.exe` | Older NVIDIA GPUs such as the GTX 750 and 900 series and the GeForce 940MX, up to RTX 40 |
+| Intel GPU | `..._intel_gpu_..._installer.exe` | Intel Arc and Core Ultra graphics |
+
+Every edition runs Piper and Kokoro voices on any DirectX 12 GPU (NVIDIA, AMD, or Intel), and everything falls back to the CPU when no GPU is available. If your NVIDIA GPU is outside an edition's range, **Preferences > Performance** says which edition can use it.
 
 Models (`faster-whisper`, translation models, transliteration models, and dubbing voices) download automatically on first use and are cached locally - no repeated downloads, no internet required afterward. **Models** in the title bar lists them all, with download and remove buttons.
 
@@ -254,7 +262,7 @@ Japanese and Chinese are dubbed with voice cloning only: their stock voices need
 
 - **Speakers** - voice cloning listens to the original audio, tells the speakers apart, and gives each one their own cloned voice. Choose **One voice for everyone** to skip that.
 - **Timing** - speech is spoken a sentence at a time, so a sentence split over several subtitles is said once, with natural intonation, in the time of all of them. Each sentence starts exactly when its first subtitle does. A sentence that doesn't fit before the next one is spoken faster, up to the **Fastest speech** limit (1.35x by default); if it is still too long, it may run up to a second into the next sentence's time, which then starts a little later. Only beyond that, or past the end of the video, is it cut short, with a note on the file. OmniVoice knows how long a line will take before speaking it, so it speaks the line at the right speed in one pass; XTTS-v2 reuses the work already done for a line, so speeding it up costs a fraction of speaking it again.
-- **Devices** - with **Run on: Automatic**, Kokoro and Piper voices time a short sample on each GPU and the CPU and use the fastest (small voices often run faster on the CPU than on integrated graphics). The choice is kept until the app closes, so later jobs start sooner. Voice cloning is always faster on a GPU, so it uses the first one that loads the model (NVIDIA or AMD, then Intel, Apple, and DirectML) without timing them. A GPU that fails on a line hands the rest of the job to the CPU.
+- **Devices** - with **Run on: Automatic**, Kokoro and Piper voices time a short sample on each GPU and the CPU and use the fastest (small voices often run faster on the CPU than on integrated graphics). The choice is kept until the app closes, so later jobs start sooner. A strong NVIDIA GPU (GTX 16 series or newer with 8 GB or more) runs OmniVoice straight away; any other GPU is timed against the CPU on a short line, and the faster one is kept. On a GPU with too little memory for the whole model, only the part that does most of the work moves to the GPU. XTTS-v2 uses the first GPU that loads it. Speech recognition and translation time an older NVIDIA GPU that can only run them at full precision against the CPU in the same way. A GPU that fails on a line hands the rest of the job to the CPU.
 - **Fast mode** - OmniVoice refines each line in 32 steps on the Maximum quality profile and in 8 on the others, unless the Custom profile sets the voice cloning quality. The benchmark measured the same intelligibility and speaker similarity in Urdu at a quarter of the time.
 - **Line check** - cloned voices are sampled, so now and then a line comes out garbled or keeps talking past its text. Every cloned line is transcribed back with Whisper; one that doesn't match its text is spoken again (up to twice) and the best take is kept. Lines still unclear afterwards are listed in a note on the file.
 - **Fallback** - if the chosen voices can't speak a language (XTTS-v2 has no Urdu, for example), the first stock voice that can is used and the file shows a note saying so.
@@ -336,12 +344,13 @@ cd ccgen/qml; pyside6-qmllint -I . -I components main.qml PreferencesWindow.qml 
 
 ```powershell
 pip install "pyinstaller>=6.17"
-.\scripts\build.ps1                  # both installers and the portable exe (NVIDIA edition)
-.\scripts\build.ps1 -Gpu xpu         # the Intel GPU edition
-.\scripts\build_user_installer.ps1   # or just one of them (also takes -Gpu)
+.\scripts\build.ps1                  # both installers and the portable exe (standard NVIDIA edition)
+.\scripts\build.ps1 -LegacyNvidia    # the same, plus the Legacy NVIDIA edition of each
+.\scripts\build.ps1 -Gpu xpu         # the Intel GPU edition (-Gpu legacy builds only the Legacy one)
+.\scripts\build_user_installer.ps1   # or just one of them (also takes -Gpu and -LegacyNvidia)
 ```
 
-Each build first installs the PyTorch build for its GPU edition and the DirectML build of ONNX Runtime into the active environment (see `Install-GpuRuntime` in `scripts/bundle.ps1`).
+Each build first installs the PyTorch build for its GPU edition and the DirectML build of ONNX Runtime into the active environment (see `Install-GpuRuntime` in `scripts/bundle.ps1`): PyTorch 2.8.0 for CUDA 12.8 in the standard edition, 2.8.0 for Intel XPU in the Intel GPU edition, and 2.7.1 for CUDA 12.6 in the Legacy NVIDIA edition, the newest PyTorch that still runs Maxwell GPUs. With `-LegacyNvidia`, the Legacy edition is built first, so the environment ends on the other edition's PyTorch.
 
 The PyInstaller options live in `scripts/bundle.ps1`, shared by every build script and the release workflow. After bundling, each build runs the app with `--self-test`, which imports every engine, loads the native libraries, decodes a short audio clip, loads the dubbing voices' pronunciation data and dictionaries, starts the local API, and compiles every QML screen. It also lists the GPUs each runtime can use. A module or DLL missing from the bundle stops the build with a report instead of reaching users. You can run the same check on any build yourself: `CC-Gen-Ultimate.exe --self-test report.txt`.
 
@@ -358,7 +367,8 @@ Every icon size and `CCGenUltimate.ico` are drawn by `scripts/make_icons.py`; af
 | GUI window doesn't appear | Check the log output for "Embedded API server failed to start" - another process may be holding the local port |
 | Slow transcription on CPU | Use a smaller model (`base`/`small`), or `large-v3-turbo` on an NVIDIA GPU, or the Light profile under **Preferences > Performance** |
 | Dubbing takes a long time | Voice cloning is heavy on a CPU; OmniVoice's fast mode (Light and Balanced profiles) takes a quarter of the full-quality time, and Kokoro or Piper voices run faster than real time |
-| GPU isn't used | Install the CUDA 12 and cuDNN 9 runtime libraries; with **Run on: Automatic** the app falls back to the CPU when they're missing (the status line shows "Model ready (CPU)") |
+| GPU isn't used | Install the CUDA 12 and cuDNN 9 runtime libraries; with **Run on: Automatic** the app falls back to the CPU when they're missing (the status line shows "Model ready (CPU)"). An older NVIDIA GPU may also be slower than the CPU, which Automatic measures and avoids |
+| "needs the Legacy NVIDIA edition" | Your NVIDIA GPU is older than this edition supports (for example a GeForce 940MX or GTX 900 series card); install the Legacy NVIDIA edition to use it |
 | Cancel takes a few seconds | Transcription stops at the end of the current 30-second audio window; the status shows "Cancelling..." until then |
 | A file shows "Failed" | Hover it to read the error; failed files run again on the next Start |
 | "has no audio track" | The video has no sound stream (for example a screen recording made with audio off); there is nothing to caption or clone |

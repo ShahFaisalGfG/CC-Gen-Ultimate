@@ -423,7 +423,7 @@ AppWindow {
                         title: "Performance"
                         FormRow {
                             label: "Run on"
-                            hint: "Automatic uses an NVIDIA GPU when its CUDA libraries are installed, otherwise the CPU."
+                            hint: "Automatic uses an NVIDIA GPU when its CUDA libraries are installed (an older one only when it beats the CPU), otherwise the CPU."
                             StyledComboBox {
                                 id: deviceCombo
                                 Layout.fillWidth: true
@@ -610,7 +610,7 @@ AppWindow {
                         }
                         FormRow {
                             label: "Run on"
-                            hint: "Automatic times Kokoro and Piper voices on each supported GPU (NVIDIA, AMD, Intel, or Apple) and the CPU and keeps the fastest until the app closes. Voice cloning uses the first GPU that works, or the CPU."
+                            hint: "Automatic times Kokoro and Piper voices on each supported GPU (NVIDIA, AMD, Intel, or Apple) and the CPU and keeps the fastest until the app closes. OmniVoice uses a strong GPU straight away and times a smaller one against the CPU; XTTS-v2 uses the first GPU that works."
                             StyledComboBox {
                                 id: dubDeviceCombo
                                 Layout.fillWidth: true

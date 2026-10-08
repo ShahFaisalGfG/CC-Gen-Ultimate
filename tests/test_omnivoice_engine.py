@@ -142,6 +142,101 @@ class TestOmniVoiceEngine:
         assert engine.natural_seconds("Hello there") == pytest.approx(1.2)  # "Hello there." at 0.1 s/char
 
 
+def _tiny_omnivoice(fail=False):
+    """A real torch module shaped like OmniVoice: a backbone and an audio codec submodule."""
+    import torch
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.backbone = torch.nn.Linear(4, 4)
+            self.audio_tokenizer = torch.nn.Linear(4, 4)
+            self.moved_with_codec: list[bool] = []
+
+        def to(self, *args, **kwargs):
+            self.moved_with_codec.append(self.audio_tokenizer is not None)
+            return super().to(*args, **kwargs)
+
+        def generate(self, **kwargs):
+            if fail:
+                raise RuntimeError("CUDA error: no kernel image is available")
+
+    return Model()
+
+
+class TestPlacement:
+    def _gpu(self):
+        import torch
+
+        from ccgen.engines.devices import Accelerator
+
+        return Accelerator(torch.device("cpu"), "NVIDIA GPU (CUDA): Test")  # a stand-in GPU
+
+    def test_a_gpu_gets_a_half_precision_backbone_and_a_full_precision_codec(self):
+        import torch
+
+        from ccgen.engines.speech.omnivoice_engine import _place
+
+        model = _place(_tiny_omnivoice(), self._gpu())
+        assert model.backbone.weight.dtype == torch.float16
+        assert model.audio_tokenizer.weight.dtype == torch.float32
+
+    def test_the_codec_stays_behind_when_the_gpu_is_short_of_memory(self):
+        from ccgen.engines.speech import omnivoice_engine
+
+        model = _tiny_omnivoice()
+        with patch.object(omnivoice_engine, "_codec_fits", return_value=False):
+            omnivoice_engine._place(model, self._gpu())
+        assert model.moved_with_codec == [False] and model.audio_tokenizer is not None
+
+    def test_a_failed_gpu_hands_back_a_full_precision_model(self):
+        import torch
+
+        from ccgen.engines.speech.omnivoice_engine import _place
+
+        model = _tiny_omnivoice(fail=True)
+        with pytest.raises(RuntimeError, match="no kernel image"):
+            _place(model, self._gpu())
+        assert model.backbone.weight.dtype == torch.float32 and model.audio_tokenizer is not None
+
+    def test_a_strong_gpu_is_used_without_timing(self):
+        import torch
+
+        from ccgen.engines.devices import Accelerator
+        from ccgen.engines.speech import omnivoice_engine
+
+        cpu = Accelerator(torch.device("cpu"), "CPU")
+        strong = SimpleNamespace(strong=True)
+        with (
+            patch.object(omnivoice_engine, "cuda_gpu", return_value=strong),
+            patch.object(omnivoice_engine, "fastest_working", side_effect=AssertionError("timed")),
+        ):
+            assert omnivoice_engine._settle(_tiny_omnivoice(), [self._gpu(), cpu]) == self._gpu()
+
+    def test_a_weak_gpu_that_wins_the_timing_keeps_the_model(self):
+        import torch
+
+        from ccgen.engines.devices import Accelerator
+        from ccgen.engines.speech import omnivoice_engine
+
+        cpu = Accelerator(torch.device("cpu"), "CPU")
+        gpu = self._gpu()
+
+        def timed(order, place, probe):
+            assert order == [cpu, gpu]  # the CPU first, so a winning GPU needs no second move
+            for accelerator in order:
+                place(accelerator)
+            return None, gpu
+
+        model = _tiny_omnivoice()
+        with (
+            patch.object(omnivoice_engine, "cuda_gpu", return_value=SimpleNamespace(strong=False)),
+            patch.object(omnivoice_engine, "fastest_working", side_effect=timed),
+        ):
+            assert omnivoice_engine._settle(model, [gpu, cpu]) == gpu
+        assert model.backbone.weight.dtype == torch.float16
+
+
 class TestOnePassFit:
     def test_engine_that_plans_its_length_is_sped_up_without_a_second_take(self, tmp_path):
         from ccgen.core.dubbing import TRACK_RATE, synthesize_track

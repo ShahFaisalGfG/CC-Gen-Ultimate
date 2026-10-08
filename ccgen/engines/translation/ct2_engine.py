@@ -1,7 +1,7 @@
 # ct2_engine.py - OPUS-MT, NLLB-200, and MADLAD-400 translation on CTranslate2
 #
 # All three run on CTranslate2, the runtime faster-whisper already ships: 8-bit on the CPU, or
-# float16 on an NVIDIA GPU when one works. Each family only differs in how text becomes tokens
+# on an NVIDIA GPU when one works (an older GPU only when it beats the CPU; see devices.ct2_open). Each family only differs in how text becomes tokens
 # and how the target language is chosen (OPUS-MT: a >>urd<< token for multi-target models;
 # NLLB: a target language prefix; MADLAD: a <2ur> tag). Sentences are translated in batches,
 # and with the meaning check on, the last step asks for several candidates and keeps the one
@@ -27,6 +27,7 @@ from ccgen.config.translation_models import (
     route,
 )
 from ccgen.core import Segment, TranslatedSegment
+from ccgen.engines.devices import ct2_open
 from ccgen.engines.model_cache import ModelCache
 from ccgen.engines.translation.base import TranslationEngine
 from ccgen.engines.translation.fidelity import MeaningCheck
@@ -38,6 +39,9 @@ _log = logging.getLogger(__name__)
 # A pivot route (Chinese -> English -> Urdu) keeps both of its models loaded.
 _models: ModelCache["_Loaded"] = ModelCache("Translation", capacity=2)
 _BATCH = 8
+# A tiny input for timing a GPU against the CPU; pieces a vocabulary lacks become <unk>, which
+# still runs the whole model.
+_PROBE_TOKENS = ["▁Hello", "▁world", "."]
 _BEAM = 4
 _CANDIDATES = 4
 _MAX_TOKENS = 512
@@ -182,19 +186,14 @@ class Ct2Engine(TranslationEngine):
         raise ValueError(f"Unknown translation model: '{self._engine}'.")
 
     def _load(self, model: Ct2Model, folder: str) -> _Loaded:
-        """Open a model on an NVIDIA GPU when one works, otherwise on the CPU."""
-        translator, device = _open_translator(folder)
-        return _Loaded(translator, _load_tokenizer(model), device)
-
-
-def _open_translator(folder: str) -> tuple[Any, str]:
-    """A CTranslate2 translator in float16 on CUDA, or 8-bit on the CPU."""
-    try:
-        if ctranslate2.get_cuda_device_count() > 0:
-            return ctranslate2.Translator(folder, device="cuda", compute_type="float16"), "gpu"
-    except Exception as e:  # missing CUDA libraries or too little GPU memory
-        _log.warning("Translation on the GPU failed, using the CPU: %r", e)
-    return ctranslate2.Translator(folder, device="cpu", compute_type="int8"), "cpu"
+        """Open a model on an NVIDIA GPU when one works (and, on an older GPU, beats the CPU),
+        otherwise on the CPU."""
+        translator, device, _ = ct2_open(
+            folder,
+            lambda d, c: ctranslate2.Translator(folder, device=d, compute_type=c),
+            lambda t: t.translate_batch([_PROBE_TOKENS], max_decoding_length=8),
+        )
+        return _Loaded(translator, _load_tokenizer(model), "gpu" if device == "cuda" else "cpu")
 
 
 def _load_tokenizer(model: Ct2Model) -> Any:

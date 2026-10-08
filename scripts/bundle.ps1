@@ -4,41 +4,50 @@
 
 $SelfTestTimeoutSec = 300
 
-# One installer can carry only one PyTorch build, and each GPU vendor needs its own, so every
-# build targets one: "cuda" (NVIDIA, the main release) or "xpu" (Intel Arc and Core Ultra).
+# One installer can carry only one PyTorch build, and each GPU family needs its own, so every
+# build targets one:
+#   cuda   - NVIDIA, the main release. 2.8.0 on CUDA 12.8 carries code for sm_61 to sm_120:
+#            GeForce GTX 10 series cards up to RTX 50.
+#   legacy - older NVIDIA GPUs. 2.7.1 on CUDA 12.6 is the newest PyTorch that still carries
+#            Maxwell code (sm_50 to sm_90): GTX 750 and 900 series and GeForce 940MX cards, up
+#            to RTX 40, but not RTX 50. PyTorch 2.8 removed Maxwell from every CUDA build.
+#   xpu    - Intel Arc and Core Ultra graphics.
 # Speech recognition and voice cloning use PyTorch; Piper and Kokoro voices run through
-# DirectML in both builds, which reaches any DirectX 12 GPU (NVIDIA, AMD, or Intel).
-# The version matches the torch<2.9 pin in requirements.txt.
-$TorchVersion = "2.8.0"
-$TorchIndex = @{
-    cuda = "https://download.pytorch.org/whl/cu128"
-    xpu  = "https://download.pytorch.org/whl/xpu"
-}
-# Local version label of each index's wheels. Pinning it matters: pip treats any installed
-# 2.8.0 wheel as satisfying "torch==2.8.0" and only swaps it for a label that sorts higher, so
+# DirectML in every build, which reaches any DirectX 12 GPU (NVIDIA, AMD, or Intel).
+# Every version stays within the torch<2.9 pin in requirements.txt.
+#
+# Each pin carries its local version label. That matters: pip treats any installed wheel of a
+# version as satisfying "torch==<version>" and only swaps it for a label that sorts higher, so
 # an NVIDIA build made after an Intel build would otherwise keep the +xpu wheel.
-$TorchLocal = @{
-    cuda = "cu128"
-    xpu  = "xpu"
+$TorchPin = @{
+    cuda   = "2.8.0+cu128"
+    legacy = "2.7.1+cu126"
+    xpu    = "2.8.0+xpu"
 }
-# Appended to installer and portable file names; the NVIDIA build keeps the plain names.
+$TorchIndex = @{
+    cuda   = "https://download.pytorch.org/whl/cu128"
+    legacy = "https://download.pytorch.org/whl/cu126"
+    xpu    = "https://download.pytorch.org/whl/xpu"
+}
+# Appended to installer and portable file names; the main NVIDIA build keeps the plain names.
 $GpuSuffix = @{
-    cuda = ""
-    xpu  = "_intel_gpu"
+    cuda   = ""
+    legacy = "_nvidia_legacy"
+    xpu    = "_intel_gpu"
 }
 
 function Install-GpuRuntime {
     <#
     .SYNOPSIS
-        Installs the PyTorch build for one GPU vendor and the DirectML build of ONNX Runtime.
+        Installs the PyTorch build for one GPU family and the DirectML build of ONNX Runtime.
     .DESCRIPTION
         Run after `pip install -r requirements.txt`. onnxruntime-directml ships the same
         `onnxruntime` module as the CPU package that faster-whisper and kokoro-onnx depend on, so
         the CPU package is removed first and DirectML installed without dependencies.
     #>
-    param([Parameter(Mandatory)] [ValidateSet("cuda", "xpu")] [string]$Gpu)
+    param([Parameter(Mandatory)] [ValidateSet("cuda", "xpu", "legacy")] [string]$Gpu)
 
-    $Pin = "$TorchVersion+$($TorchLocal[$Gpu])"
+    $Pin = $TorchPin[$Gpu]
     python -m pip install --upgrade "torch==$Pin" "torchaudio==$Pin" --index-url $TorchIndex[$Gpu]
     if ($LASTEXITCODE -ne 0) { throw "Installing the $Gpu build of PyTorch failed (exit $LASTEXITCODE)" }
     python -m pip uninstall --yes onnxruntime

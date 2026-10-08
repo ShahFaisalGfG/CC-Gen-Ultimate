@@ -10,7 +10,8 @@ uvicorn[standard]>=0.32
 transformers>=4.51,<5
 # coqui-tts refuses to import on torch 2.9+ without torchcodec and FFmpeg DLLs it never uses for
 # inference, and torchaudio stops at 2.11; 2.8 is the newest pair XTTS runs on cleanly. The build
-# scripts install the CUDA or XPU build of this same version (see scripts/bundle.ps1).
+# scripts install each edition's build within this range: 2.8.0 for CUDA 12.8 and Intel XPU, and
+# 2.7.1 for CUDA 12.6, the newest that still runs older NVIDIA GPUs (see scripts/bundle.ps1).
 torch>=2.2,<2.9
 torchaudio>=2.2,<2.9
 sentencepiece>=0.2.0
