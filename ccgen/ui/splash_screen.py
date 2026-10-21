@@ -66,7 +66,7 @@ class SplashScreen(QWidget):
         self._bar.setStyleSheet(
             "QProgressBar { background: rgba(255,255,255,0.08); border: none; border-radius: 3px; }"
             "QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            " stop:0 #0078d4, stop:1 #00b4d8); border-radius: 3px; }"
+            " stop:0 #ec5aa6, stop:1 #6b5cf0); border-radius: 3px; }"  # the icon gradient (scripts/make_icons.py)
         )
         bar_row.addWidget(self._bar)
 

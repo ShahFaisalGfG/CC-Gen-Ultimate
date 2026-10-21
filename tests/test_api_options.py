@@ -59,7 +59,7 @@ class TestGetOptions:
 
     def test_dub_modes_put_voice_cloning_first_with_trade_offs(self, client):
         modes = client.get("/options").json()["dub_modes"]
-        assert [m["code"] for m in modes] == ["xtts", "kokoro", "piper"]
+        assert [m["code"] for m in modes] == ["auto", "omnivoice", "xtts", "kokoro", "piper"]
         assert all(m["hint"] for m in modes)
 
     def test_voices_cover_urdu(self, client):

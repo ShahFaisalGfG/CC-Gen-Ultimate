@@ -4,13 +4,14 @@ import logging
 import os
 from typing import Callable, Iterator, Optional
 
-import ctranslate2
 import numpy as np
 from faster_whisper import WhisperModel
 
-from ccgen.config.defaults import AudioDefaults, ComputeDefaults, ModelDefaults, TranscriptionDefaults
+from ccgen.config.defaults import AUTO, AudioDefaults, ComputeDefaults, TranscriptionDefaults
+from ccgen.config.profiles import whisper_model
 from ccgen.core import Segment, WordToken
 from ccgen.engines.captions.base import CaptionEngine
+from ccgen.engines.devices import ct2_gpu_compute_type, ct2_open
 from ccgen.engines.model_cache import ModelCache
 from ccgen.utils.callbacks import JobCancelled, emit_progress, emit_segment, emit_status
 from ccgen.utils.download_progress import download_progress
@@ -23,21 +24,14 @@ _CUDA_PROBE_SAMPLES = 16000
 
 
 def resolve_compute(device: str, compute_type: str) -> tuple[str, str]:
-    """Resolve "auto" device/compute type values into concrete CTranslate2 settings."""
+    """Resolve "auto" device/compute type values into concrete CTranslate2 settings: the GPU's
+    fastest type (float32 on older GPUs) or 8-bit on the CPU."""
+    gpu_type = None if device == "cpu" else ct2_gpu_compute_type()
     if device == ComputeDefaults.DEVICE_AUTO:
-        device = "cuda" if _cuda_device_count() > 0 else "cpu"
+        device = "cuda" if gpu_type else "cpu"
     if compute_type == ComputeDefaults.COMPUTE_AUTO:
-        compute_type = "float16" if device == "cuda" else "int8"
+        compute_type = (gpu_type or "float32") if device == "cuda" else "int8"
     return device, compute_type
-
-
-def _cuda_device_count() -> int:
-    """Return the number of CUDA devices CTranslate2 can see, 0 when CUDA is unavailable."""
-    try:
-        return ctranslate2.get_cuda_device_count()
-    except Exception:
-        _log.debug("CUDA device query failed", exc_info=True)
-        return 0
 
 
 class WhisperEngine(CaptionEngine):
@@ -45,11 +39,11 @@ class WhisperEngine(CaptionEngine):
 
     def __init__(
         self,
-        model_name: str = ModelDefaults.DEFAULT_MODEL,
+        model_name: str = AUTO,
         device: str = ComputeDefaults.DEFAULT_DEVICE,
         compute_type: str = ComputeDefaults.DEFAULT_COMPUTE_TYPE,
     ) -> None:
-        self._model_name = model_name
+        self._model_name = whisper_model(model_name, "")
         self._device = device
         self._compute_type = compute_type
         self._model: Optional[WhisperModel] = None
@@ -62,20 +56,20 @@ class WhisperEngine(CaptionEngine):
         """Load (and download if needed) the Whisper model, reusing a cached instance.
 
         With device "auto", a GPU that fails to initialise (for example missing CUDA runtime
-        libraries) falls back to the CPU instead of failing the job.
+        libraries) falls back to the CPU instead of failing the job, and an older GPU that runs
+        only in float32 is timed against the CPU and used only when faster.
         """
-        device, compute_type = resolve_compute(self._device, self._compute_type)
         try:
             emit_status(progress_cb, f"Loading model '{self._model_name}'...")
-            try:
-                self._model = self._load_cached(device, compute_type, progress_num_cb)
-            except JobCancelled:
-                raise
-            except Exception as gpu_error:
-                if device != "cuda" or self._device != ComputeDefaults.DEVICE_AUTO:
-                    raise
-                _log.warning("GPU unavailable (%r), falling back to CPU", gpu_error)
-                device, compute_type = resolve_compute("cpu", ComputeDefaults.COMPUTE_AUTO)
+            if self._device == ComputeDefaults.DEVICE_AUTO:
+                self._model, device, compute_type = ct2_open(
+                    f"whisper:{self._model_name}",
+                    lambda d, c: self._load_cached(d, c, progress_num_cb),
+                    lambda model: model.detect_language(np.zeros(_CUDA_PROBE_SAMPLES, dtype=np.float32)),
+                    self._compute_type,
+                )
+            else:
+                device, compute_type = resolve_compute(self._device, self._compute_type)
                 self._model = self._load_cached(device, compute_type, progress_num_cb)
             emit_status(progress_cb, f"Model ready ({'GPU' if device == 'cuda' else 'CPU'}).")
             _log.info("Whisper model ready: %s on %s/%s", self._model_name, device, compute_type)

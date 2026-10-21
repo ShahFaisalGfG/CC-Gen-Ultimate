@@ -24,6 +24,10 @@ SAME_SPEAKER_SIMILARITY = 0.5
 MIN_SPEAKER_SECONDS = 4.0
 # Reference audio collected per speaker; XTTS conditions on up to about this much.
 REFERENCE_SECONDS = 12.0
+# Reference clips reach this far past their cue on each side, so the cue's first and last words
+# are whole: cue times end where the last word does, and a word cut short there is one a cloning
+# engine would try to finish before every line.
+REFERENCE_PAD_S = 0.25
 # Embedding every cue of a long film adds little; the longest ones decide the speakers.
 MAX_EMBEDDED_CUES = 300
 
@@ -71,7 +75,7 @@ def reference_clips(
     references: dict[int, list[np.ndarray]] = {}
     for speaker in sorted(set(speakers)):
         members = [cue for cue, s in zip(cues, speakers) if s == speaker]
-        clips = sorted((_cut(audio, rate, cue) for cue in members), key=_clip_score, reverse=True)
+        clips = sorted((_cut(audio, rate, cue, REFERENCE_PAD_S) for cue in members), key=_clip_score, reverse=True)
         chosen: list[np.ndarray] = []
         total = 0.0
         for clip in clips:
@@ -83,9 +87,9 @@ def reference_clips(
     return references
 
 
-def _cut(audio: np.ndarray, rate: int, cue: Segment) -> np.ndarray:
-    """The samples a cue spans."""
-    return audio[max(0, int(cue["start"] * rate)): max(0, int(cue["end"] * rate))]
+def _cut(audio: np.ndarray, rate: int, cue: Segment, pad: float = 0.0) -> np.ndarray:
+    """The samples a cue spans, `pad` seconds wider on each side."""
+    return audio[max(0, int((cue["start"] - pad) * rate)): max(0, int((cue["end"] + pad) * rate))]
 
 
 def _clip_score(clip: np.ndarray) -> float:

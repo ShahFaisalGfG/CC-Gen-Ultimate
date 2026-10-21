@@ -57,6 +57,29 @@ class TestLoadSettings:
             json.dump({}, fh)
         assert load_settings() == get_default_settings()
 
+    def test_old_files_move_untouched_model_defaults_to_automatic(self, monkeypatch, tmp_path):
+        fake_path = _redirect_settings_file(monkeypatch, tmp_path)
+        with open(fake_path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "model": {"name": "base"},
+                "translation": {"engine": "nllb"},
+                "transliteration": {"engine": "rule"},
+                "dubbing": {"mode": "xtts", "xtts_terms_accepted": True},
+            }, fh)
+        result = load_settings()
+        # Old defaults become Automatic; a model picked by hand (NLLB) and answers stay.
+        assert (result["model"]["name"], result["transliteration"]["engine"], result["dubbing"]["mode"]) == (
+            "auto", "auto", "auto")
+        assert result["translation"]["engine"] == "nllb"
+        assert result["dubbing"]["xtts_terms_accepted"] is True
+        assert result["version"] == 2
+
+    def test_current_files_are_not_migrated_again(self, monkeypatch, tmp_path):
+        fake_path = _redirect_settings_file(monkeypatch, tmp_path)
+        with open(fake_path, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "model": {"name": "base"}}, fh)
+        assert load_settings()["model"]["name"] == "base"
+
     def test_drops_options_removed_since_the_file_was_written(self, monkeypatch, tmp_path):
         fake_path = _redirect_settings_file(monkeypatch, tmp_path)
         with open(fake_path, "w", encoding="utf-8") as fh:

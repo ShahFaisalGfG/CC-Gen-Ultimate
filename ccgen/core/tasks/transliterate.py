@@ -3,6 +3,7 @@
 import logging
 
 from ccgen.config.defaults import TransliterationDefaults
+from ccgen.config.profiles import transliteration_engine
 from ccgen.core import Segment
 from ccgen.core.cues import CueLayout
 from ccgen.core.tasks.base import RunContext, Task, TaskResult, Track
@@ -68,8 +69,9 @@ class TransliterateTask(Task[TransliterateConfig]):
     def __init__(self, config: TransliterateConfig) -> None:
         super().__init__(config)
         self._layout = CueLayout(max_line_length=config.max_line_length, max_lines=config.max_lines)
+        engine = transliteration_engine(config.engine, config.profile, config.source_scheme, config.target_scheme)
         self._engine = create_transliteration_engine(
-            config.engine, source_scheme=config.source_scheme, target_scheme=config.target_scheme,
+            engine, source_scheme=config.source_scheme, target_scheme=config.target_scheme,
         )
 
     @property

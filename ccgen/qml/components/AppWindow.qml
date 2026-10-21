@@ -25,7 +25,7 @@ ApplicationWindow {
     Material.background: Theme.surface
     Material.foreground: Theme.text
 
-    Overlay.modal: Rectangle { color: Theme.dark ? "#b3000000" : "#80000000" }
+    Overlay.modal: Rectangle { color: Theme.scrim }
 
     Binding {
         target: Theme

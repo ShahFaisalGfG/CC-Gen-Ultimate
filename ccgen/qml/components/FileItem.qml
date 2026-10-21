@@ -10,6 +10,7 @@ Rectangle {
     signal clicked(int index, int modifiers)
     signal contextMenuRequested(int index)
     signal removeRequested(int index)
+    signal languageChosen(int index, string language)
 
     required property int index
     required property string name
@@ -24,10 +25,23 @@ Rectangle {
     required property string message
     // The subtitle a Dub tab row speaks ("" elsewhere).
     required property string companion
+    // Language of the row's text known from its name or a hand-off, and the one the user picked
+    // ("" for Auto). Only rows with text (a subtitle, or media paired with one) show a picker.
+    required property string language
+    required property string chosenLanguage
+    // Languages to pick from: [{ label, code }].
+    property var languageOptions: []
+    // True when the tab can't run a row whose language isn't known.
+    property bool languageRequired: false
     property bool current: false
     property bool listHasFocus: false
 
     readonly property bool _busy: fileItem.status === "processing"
+    readonly property bool _hasText: fileItem.kind === "subtitle" || fileItem.companion.length > 0
+    readonly property string _languageLabel: {
+        var known = fileItem.languageOptions.find(o => o.code === fileItem.language)
+        return known ? known.label : fileItem.language
+    }
     readonly property string _statusText: {
         switch (fileItem.status) {
         case "processing": return fileItem.progress > 0 ? Math.round(fileItem.progress * 100) + "%" : "Working"
@@ -46,7 +60,7 @@ Rectangle {
         }
     }
 
-    implicitHeight: 60
+    implicitHeight: fileItem._hasText ? 96 : 60
     radius: Theme.radius
     color: fileItem.selected ? Theme.accentSoft : (hover.hovered ? Theme.surfaceHover : "transparent")
     border.width: fileItem.current && fileItem.listHasFocus ? 2 : 0
@@ -56,6 +70,7 @@ Rectangle {
     Accessible.name: fileItem.name + ", " + fileItem._statusText
         + (fileItem.message ? ", " + fileItem.message : "")
         + (fileItem.companion ? ", speaks " + fileItem.companion : "")
+        + (fileItem._hasText && !fileItem.chosenLanguage && !fileItem.language ? ", language not chosen" : "")
     Accessible.description: fileItem.size + ", " + fileItem.folder
     Accessible.selectable: true
     Accessible.selected: fileItem.selected
@@ -132,6 +147,38 @@ Rectangle {
                 font.pixelSize: Theme.fontCaption
                 color: fileItem.status === "error" ? Theme.danger : Theme.textMuted
                 elide: Text.ElideMiddle
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 2
+                visible: fileItem._hasText
+                spacing: Theme.spaceSm
+
+                Text {
+                    text: "Language"
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textMuted
+                    Accessible.ignored: true
+                }
+                StyledComboBox {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 200
+                    implicitHeight: 28
+                    enabled: !fileItem._busy
+                    accessibleName: "Language of " + fileItem.name
+                    toolTipText: (fileItem.language
+                        ? "Auto uses the language from the file name or the tab it came from. Pick another if it's wrong."
+                        : "The file name doesn't say which language this is. Choose it.")
+                        + " With several files selected, the choice applies to all of them."
+                    placeholderText: "Choose language"
+                    mustChoose: fileItem.languageRequired && fileItem.language.length === 0
+                    model: fileItem.language
+                        ? [{ label: "Auto (" + fileItem._languageLabel + ")", code: "" }].concat(fileItem.languageOptions)
+                        : fileItem.languageOptions
+                    value: fileItem.chosenLanguage
+                    onActivated: fileItem.languageChosen(fileItem.index, currentValue)
+                }
             }
         }
 

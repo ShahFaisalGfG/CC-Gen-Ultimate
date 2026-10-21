@@ -153,6 +153,16 @@ class TestSentenceUnits:
         assert ends_sentence("کیا حال ہے؟")
         assert not ends_sentence("and then,")
 
+    def test_abbreviations_and_initials_do_not_end_a_sentence(self):
+        for text in ("I spoke with Dr.", "for example, e.g.", "John F.", "(Mr."):
+            assert not ends_sentence(text), text
+        for text in ("No.", "That was me, I.", "I got an A.", "We waited...", "Version 2."):
+            assert ends_sentence(text), text
+
+    def test_unit_continues_past_an_abbreviation(self):
+        cues = [_cue(0, "Today Dr.", 0, 1), _cue(1, "Smith joins us.", 1, 2)]
+        assert sentence_units(cues) == [[0, 1]]
+
 
 class TestDistributeText:
     def test_splits_proportionally(self):

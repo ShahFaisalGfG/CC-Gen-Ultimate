@@ -54,8 +54,9 @@ class TestListAssets:
             with patch(
                 "ccgen.utils.asset_registry.model_status.translation_pair_cached", return_value=False
             ):
-                with patch(
-                    "ccgen.utils.asset_registry.model_status.neural_translit_cached", return_value=False
+                with (
+                    patch("ccgen.utils.asset_registry.model_status.neural_translit_cached", return_value=False),
+                    patch("ccgen.utils.asset_registry.translation_files.is_ready", return_value=False),
                 ):
                     assets = list_assets()
 
@@ -64,10 +65,19 @@ class TestListAssets:
         translit = [a for a in assets if a["category"] == CATEGORY_TRANSLITERATION]
         voices = [a for a in assets if a["category"] == CATEGORY_VOICES]
         assert len(whisper) == 6
-        # Each of the 9 non-English targets, both to and from English.
-        assert len(translation) == 18
+        by_engine = {e: sum(a["engine"] == e for a in translation) for e in {a["engine"] for a in translation}}
+        assert by_engine == {
+            "OPUS-MT": 17,  # one model per English direction (some serve two languages)
+            "NLLB-200 1.3B": 1,
+            "MADLAD-400 3B": 1,
+            "Hy-MT2 1.8B": 1,
+            "Meaning check": 1,
+            "Argos Translate": 24,  # each of the 12 non-English targets, to and from English
+        }
+        # OPUS-MT, which Automatic uses for most pairs, comes first in the tab.
+        assert translation[0]["engine"] == "OPUS-MT"
         assert len(translit) == 3
-        assert {a["engine"] for a in voices} == {"XTTS-v2 (voice cloning)", "Kokoro", "Piper"}
+        assert {a["engine"] for a in voices} == {"OmniVoice (voice cloning)", "XTTS-v2 (voice cloning)", "Kokoro", "Piper"}
         assert sum(a["engine"] == "Piper" for a in voices) > 50
         assert all(a["downloaded"] is False and a["size_bytes"] is None for a in assets)
 

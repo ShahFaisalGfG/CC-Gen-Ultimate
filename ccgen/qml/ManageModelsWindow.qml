@@ -27,7 +27,7 @@ AppWindow {
 
     readonly property var categories: [
         { key: "whisper", label: "Transcription", hint: "Whisper speech recognition models. Larger models are more accurate and slower." },
-        { key: "translation", label: "Translation", hint: "Offline language packages. Each one translates between English and that language; English bridges other pairs." },
+        { key: "translation", label: "Translation", hint: "Offline translation models, grouped by the model chosen under Preferences > Translation. OPUS-MT and Argos have one model per direction, with English bridging other pairs; NLLB and MADLAD cover every pair. The meaning check compares each translation with the original." },
         { key: "transliteration", label: "Transliteration", hint: "Optional neural models for more natural script conversion. The rule-based engine needs no download." },
         { key: "voices", label: "Voices", hint: "Dubbing voices. XTTS-v2 clones the original speakers; Kokoro and Piper are ready-made voices. Each downloads once." }
     ]
@@ -110,19 +110,33 @@ AppWindow {
         })
     }
 
-    // The voice cloning model asks for its licence once before its first download.
+    // Models licensed for non-commercial use only ask for their licence once before the
+    // first download: OmniVoice and XTTS-v2 voice cloning, and the NLLB-200 translation model.
+    readonly property var licensedModels: ({
+        "voices:omnivoice": "omnivoice",
+        "voices:xtts": "xtts",
+        "translation:nllb-1.3b": "nllb"
+    })
+
     function requestDownload(id) {
-        var accepted = prefsController.settings.dubbing && prefsController.settings.dubbing.xtts_terms_accepted
-        if (id === "voices:xtts" && !accepted) {
-            termsDialog.open()
-            return
+        var model = manageWin.licensedModels[id]
+        if (model) {
+            var setting = prefsController.modelTerms(model).setting.split(".")
+            var section = prefsController.settings[setting[0]]
+            if (!(section && section[setting[1]])) {
+                termsDialog.pendingId = id
+                termsDialog.model = model
+                termsDialog.open()
+                return
+            }
         }
         modelsController.downloadAsset(id)
     }
 
-    XttsTermsDialog {
+    ModelTermsDialog {
         id: termsDialog
-        onAccepted: modelsController.downloadAsset("voices:xtts")
+        property string pendingId: ""
+        onAccepted: modelsController.downloadAsset(termsDialog.pendingId)
     }
 
     function cancelDownload(id) {
@@ -141,13 +155,11 @@ AppWindow {
     }
 
     // Remove-confirmation for bulk actions: `ids` are removed when the user confirms.
-    Dialog {
+    AppDialog {
         id: confirmRemove
         property var ids: []
         property string message: ""
         title: "Remove downloaded models?"
-        modal: true
-        anchors.centerIn: parent
         standardButtons: Dialog.Yes | Dialog.Cancel
         Text {
             width: 360

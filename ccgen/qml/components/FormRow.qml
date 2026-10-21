@@ -38,7 +38,7 @@ GridLayout {
             text: row.label
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
-            color: Theme.text
+            color: row.enabled ? Theme.text : Theme.textMuted  // a disabled row looks disabled
             wrapMode: Text.WordWrap
             Accessible.ignored: true
         }

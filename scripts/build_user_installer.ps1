@@ -7,14 +7,20 @@
     Step 3 - Shell DLL    : copies ccgen_shell.dll into dist\CC-Gen-Ultimate\
     Step 4 - Inno Setup   : compiles the per-user installer into build\installer\
 .PARAMETER Gpu
-    Which GPU the build's PyTorch targets: "cuda" (NVIDIA, the default) or "xpu" (Intel Arc and
-    Core Ultra; file names get an "_intel_gpu" suffix). See scripts/bundle.ps1.
+    Which GPU the build's PyTorch targets: "cuda" (NVIDIA, the default), "xpu" (Intel Arc and
+    Core Ultra; file names get an "_intel_gpu" suffix), or "legacy" (older NVIDIA GPUs;
+    "_nvidia_legacy"). See scripts/bundle.ps1.
+.PARAMETER LegacyNvidia
+    Also build the Legacy NVIDIA edition ("_nvidia_legacy"), whose PyTorch runs on older NVIDIA
+    GPUs such as the GeForce 940MX and GTX 900 series. It is built first, in its own run of this
+    script, so the venv ends on the -Gpu edition's PyTorch.
 .NOTES
     Requirements: Python venv with pyinstaller>=6.17, Inno Setup 6, Visual Studio Build Tools
 #>
 
 param(
-    [ValidateSet("cuda", "xpu")] [string]$Gpu = "cuda"
+    [ValidateSet("cuda", "xpu", "legacy")] [string]$Gpu = "cuda",
+    [switch]$LegacyNvidia
 )
 
 Set-StrictMode -Version Latest
@@ -40,7 +46,7 @@ function Fail([string]$Msg) {
 function Format-Elapsed([TimeSpan]$ts) {
     # $ts.Minutes/.Seconds are sub-hour remainders (0-59) - the hours branch must
     # come first, or any run past 60 minutes silently drops its hour component.
-    if ($ts.TotalHours -ge 1)   { return "{0}h {1:D2}m {2:D2}s" -f [int]$ts.TotalHours, $ts.Minutes, $ts.Seconds }
+    if ($ts.TotalHours -ge 1)   { return "{0}h {1:D2}m {2:D2}s" -f [math]::Floor($ts.TotalHours), $ts.Minutes, $ts.Seconds }
     if ($ts.TotalMinutes -ge 1) { return "{0}m {1:D2}s" -f [int]$ts.Minutes, $ts.Seconds }
     return "{0}s" -f [int]$ts.TotalSeconds
 }
@@ -51,6 +57,16 @@ $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $BuildStart  = Get-Date
 Set-Location $ProjectRoot
+
+# ── Legacy NVIDIA edition ─────────────────────────────────────────────────────
+
+if ($LegacyNvidia -and $Gpu -ne "legacy") {
+    Write-Step "Building the Legacy NVIDIA edition first"
+    & $PSCommandPath -Gpu legacy
+    if ($LASTEXITCODE -ne 0) {
+        Fail "The Legacy NVIDIA edition build failed (exit $LASTEXITCODE). Check output above."
+    }
+}
 
 # ── App metadata ──────────────────────────────────────────────────────────────
 
@@ -112,7 +128,7 @@ if (-not $Iscc) {
     Fail "Inno Setup 6 not found. Download from: https://jrsoftware.org/isinfo.php"
 }
 
-Write-Step "Installing the $Gpu GPU runtime (PyTorch $TorchVersion and DirectML)"
+Write-Step "Installing the $Gpu GPU runtime (PyTorch $($TorchPin[$Gpu]) and DirectML)"
 
 Install-GpuRuntime -Gpu $Gpu
 

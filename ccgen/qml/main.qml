@@ -132,6 +132,16 @@ AppWindow {
         }
     }
 
+    // The detected hardware chose or changed the performance profile.
+    Connections {
+        target: performanceController
+        function onNotice(message) { toast.show(message) }
+        function onSettingsSaved() {
+            prefsController.loadSettings()
+            for (var i = 0; i < mainWin.tasks.length; i++) mainWin.tasks[i].controller.reloadDefaults()
+        }
+    }
+
     // ── Layout ─────────────────────────────────────────────────────────────
 
     ColumnLayout {
@@ -223,8 +233,8 @@ AppWindow {
             TaskPage {
                 controller: translateController
                 firstRunSteps: [
-                    "Add subtitle files, or send them here from the Generate tab.",
-                    "Choose the language to translate into.",
+                    "Add videos, audio, or subtitle files. Videos are transcribed first.",
+                    "Choose the language to translate into, and the language of any subtitle without one in its name.",
                     "Press Start (Ctrl+Enter)."
                 ]
                 sendTargets: mainWin.sendTargetsFor(["transliterate", "dub"])
@@ -234,6 +244,7 @@ AppWindow {
 
                 TranslateSettings {
                     Layout.fillWidth: true
+                    forTab: true
                     options: translateController.options
                     onOptionChanged: (key, value) => translateController.setOption(key, value)
                 }
@@ -249,7 +260,7 @@ AppWindow {
             TaskPage {
                 controller: transliterateController
                 firstRunSteps: [
-                    "Add subtitle files, or send them here from another tab.",
+                    "Add videos, audio, or subtitle files, or send them here from another tab.",
                     "Choose the scripts to convert between.",
                     "Press Start (Ctrl+Enter)."
                 ]
@@ -260,6 +271,7 @@ AppWindow {
 
                 TransliterateSettings {
                     Layout.fillWidth: true
+                    forTab: true
                     options: transliterateController.options
                     onOptionChanged: (key, value) => transliterateController.setOption(key, value)
                 }
@@ -276,7 +288,7 @@ AppWindow {
                 controller: dubController
                 allowCompanion: true
                 firstRunSteps: [
-                    "Add a video together with the subtitle to speak (movie.mp4 and movie_es.srt pair up), or send a translation here.",
+                    "Add videos or audio. They are transcribed and translated for you; a subtitle added with its video (movie.mp4 and movie_es.srt) is spoken instead.",
                     "Choose the voices. Voice cloning keeps each speaker's own voice.",
                     "Press Start (Ctrl+Enter). The dub is added as a new audio track."
                 ]
@@ -285,6 +297,7 @@ AppWindow {
 
                 DubSettings {
                     Layout.fillWidth: true
+                    forTab: true
                     options: dubController.options
                     onOptionChanged: (key, value) => dubController.setOption(key, value)
                 }
@@ -333,12 +346,10 @@ AppWindow {
 
     // ── About ──────────────────────────────────────────────────────────────
 
-    Dialog {
+    AppDialog {
         id: aboutDialog
         title: "About " + appController.appName
-        modal: true
         standardButtons: Dialog.Close
-        anchors.centerIn: parent
         width: Math.min(480, mainWin.width - 48)
 
         ColumnLayout {

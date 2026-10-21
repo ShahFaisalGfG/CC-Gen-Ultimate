@@ -1,6 +1,7 @@
 # main.py - CLI entry point for CC-Gen-Ultimate (runs one task without the UI)
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -8,6 +9,7 @@ from typing import Any, Callable, NoReturn
 
 from ccgen.api.schemas.job import parse_task_config
 from ccgen.config.defaults import (
+    AUTO,
     ComputeDefaults,
     DubbingDefaults,
     ModelDefaults,
@@ -15,19 +17,29 @@ from ccgen.config.defaults import (
     TranslationDefaults,
     TransliterationDefaults,
 )
+from ccgen.config.profiles import PROFILE_KEYS, effective_profile
+from ccgen.config.translation_models import ENGINE_KEYS as TRANSLATION_ENGINE_KEYS
 from ccgen.core.tasks import create_task
 from ccgen.core.tasks.configs import SUBTITLE_FORMATS
 from ccgen.utils.logging import configure_logging
+from ccgen.utils.settings import load_settings
 
 
 def main() -> None:
     """Parse CLI arguments and run the chosen task on one file."""
+    # Statuses and subtitles carry characters (→, Urdu, Devanagari) a legacy Windows console
+    # code page can't encode; print a placeholder for those instead of raising mid-run.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
     args = _parse_args()
     configure_logging(enabled=False)
     if not os.path.isfile(args.input):
         _fail(f"File not found: {args.input}")
+    # Automatic model choices follow the profile saved for this PC unless one is given.
+    body = {**args.build(args), "profile": args.profile or effective_profile(load_settings())}
     try:
-        config = parse_task_config(args.build(args))
+        config = parse_task_config(body)
     except ValueError as e:
         _fail(str(e))
     task = create_task(config)
@@ -58,8 +70,8 @@ def _parse_args() -> argparse.Namespace:
 
     generate = _command(commands, "generate", "Transcribe a video or audio file into subtitles.", _generate_body)
     generate.add_argument(
-        "--model", default=ModelDefaults.DEFAULT_MODEL, choices=ModelDefaults.SUPPORTED_MODELS,
-        help=f"Whisper model (default: {ModelDefaults.DEFAULT_MODEL}).",
+        "--model", default=ModelDefaults.DEFAULT_MODEL, choices=[AUTO, *ModelDefaults.SUPPORTED_MODELS],
+        help="Whisper model; auto picks one for the performance profile (default: auto).",
     )
     generate.add_argument(
         "--device", default=ComputeDefaults.DEFAULT_DEVICE, choices=ComputeDefaults.SUPPORTED_DEVICES,
@@ -81,6 +93,10 @@ def _parse_args() -> argparse.Namespace:
         "--target-lang", default=TranslationDefaults.DEFAULT_TARGET_LANG,
         help=f"Language to translate into (default: {TranslationDefaults.DEFAULT_TARGET_LANG}).",
     )
+    translate.add_argument(
+        "--engine", choices=TRANSLATION_ENGINE_KEYS, default=TranslationDefaults.DEFAULT_ENGINE,
+        help=f"Translation model (default: {TranslationDefaults.DEFAULT_ENGINE}).",
+    )
 
     transliterate = _command(
         commands, "transliterate", "Convert a subtitle file to another script.", _transliterate_body,
@@ -95,7 +111,7 @@ def _parse_args() -> argparse.Namespace:
     )
     transliterate.add_argument(
         "--engine", default=TransliterationDefaults.DEFAULT_ENGINE,
-        choices=[TransliterationDefaults.ENGINE_RULE, TransliterationDefaults.ENGINE_NEURAL],
+        choices=[code for _, code in TransliterationDefaults.ENGINES],
         help=f"Transliteration engine (default: {TransliterationDefaults.DEFAULT_ENGINE}).",
     )
 
@@ -110,7 +126,8 @@ def _parse_args() -> argparse.Namespace:
     )
     dub.add_argument(
         "--mode", default=DubbingDefaults.DEFAULT_MODE, choices=[code for _, code, _ in DubbingDefaults.MODES],
-        help="xtts clones the original voices; kokoro and piper use stock voices (default: xtts).",
+        help="omnivoice and xtts clone the original voices; kokoro and piper use stock voices; auto picks "
+             "for the performance profile (default: auto).",
     )
     dub.add_argument("--voice", default=DubbingDefaults.VOICE_AUTO, help="Kokoro/Piper voice key, e.g. piper:ur_PK-fasih-medium.")
     dub.add_argument(
@@ -120,6 +137,11 @@ def _parse_args() -> argparse.Namespace:
     dub.add_argument(
         "--max-speedup", type=float, default=DubbingDefaults.MAX_SPEEDUP,
         help=f"Fastest speech allowed to fit a line's time (default: {DubbingDefaults.MAX_SPEEDUP}).",
+    )
+    dub.add_argument(
+        "--quality", default=DubbingDefaults.DEFAULT_QUALITY, choices=[code for _, code, _ in DubbingDefaults.QUALITIES],
+        help="How carefully OmniVoice refines each line: full (32 steps) or fast (8 steps); auto follows "
+             "the performance profile (default: auto).",
     )
     dub.add_argument("--wav", action="store_true", help="Write a separate WAV file instead of adding a track.")
     dub.add_argument("--default-track", action="store_true", help="Make the dub the default audio track.")
@@ -146,6 +168,11 @@ def _command(
     parser.set_defaults(build=build)
     parser.add_argument("input", help="File to process")
     parser.add_argument("--output-dir", default=None, help="Folder for output files (default: next to the input).")
+    parser.add_argument(
+        "--profile", default=None, choices=PROFILE_KEYS,
+        help="Performance profile that picks every auto model (default: the one saved for this PC, the "
+             "recommended one when Custom is saved, or light).",
+    )
     if not subtitles:
         return parser
     parser.add_argument(
@@ -186,7 +213,10 @@ def _generate_body(args: argparse.Namespace) -> dict[str, Any]:
 
 def _translate_body(args: argparse.Namespace) -> dict[str, Any]:
     """Request body for the translate subcommand."""
-    return {**_common_body(args, "translate"), "source_lang": args.source_lang, "target_lang": args.target_lang}
+    return {
+        **_common_body(args, "translate"), "source_lang": args.source_lang, "target_lang": args.target_lang,
+        "engine": args.engine,
+    }
 
 
 def _transliterate_body(args: argparse.Namespace) -> dict[str, Any]:
@@ -207,6 +237,7 @@ def _dub_body(args: argparse.Namespace) -> dict[str, Any]:
         "output": DubbingDefaults.OUTPUT_WAV if args.wav else DubbingDefaults.OUTPUT_TRACK,
         "default_track": args.default_track,
         "device": DubbingDefaults.DEVICE_CPU if args.cpu else DubbingDefaults.DEVICE_AUTO,
+        "quality": args.quality,
         "reference_audio": os.path.abspath(args.reference) if args.reference else None,
     }
 

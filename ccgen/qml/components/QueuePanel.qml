@@ -143,6 +143,8 @@ Rectangle {
             firstRunSteps: panel.firstRunSteps
             sendTargets: panel.sendTargets
             allowCompanion: panel.allowCompanion
+            languageOptions: prefsController.targetOptions
+            languageRequired: panel.controller.needsSubtitleLanguage
             onAddFilesRequested: filePicker.open()
             onAddFolderRequested: folderPicker.open()
             onFilesDropped: urls => panel.controller.addFiles(urls)

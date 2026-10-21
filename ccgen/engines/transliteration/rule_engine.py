@@ -1,6 +1,7 @@
 # rule_engine.py - fast, fully offline transliteration: indic-transliteration for genuine
-# Indic-script pairs, a dedicated converter for Urdu <-> Roman Urdu, and diacritic cleanup
-# for Hindi/Punjabi -> Urdu output (see urdu_roman_map.py for why the built-in scheme isn't used)
+# Indic-script pairs, dedicated converters for Urdu <-> Roman Urdu and Urdu -> Devanagari (other
+# Indic scripts go through Devanagari), and diacritic cleanup for Hindi/Punjabi -> Urdu output
+# (see urdu_roman_map.py and urdu_devanagari.py for why the built-in urdu scheme isn't used)
 
 import logging
 import re
@@ -10,6 +11,7 @@ from indic_transliteration import sanscript
 
 from ccgen.core import Segment, TranslatedSegment, TransliteratedSegment
 from ccgen.engines.transliteration.base import TransliterationEngine
+from ccgen.engines.transliteration.urdu_devanagari import urdu_to_devanagari
 from ccgen.engines.transliteration.urdu_roman_map import roman_to_urdu, urdu_to_roman
 from ccgen.utils.callbacks import JobCancelled, emit_progress, emit_segment
 
@@ -109,6 +111,13 @@ class RuleEngine(TransliterationEngine):
             return urdu_to_roman(text)
         if self._source_key == _ROMAN_KEY and self._target_key == _URDU_KEY:
             return roman_to_urdu(text)
+        if self._source_key == _URDU_KEY:
+            # indic-transliteration's urdu scheme leaves most letters unconverted, so Urdu goes
+            # to Devanagari first and from there to any other Indic script.
+            devanagari = urdu_to_devanagari(text)
+            if self._target_key == "hi":
+                return devanagari
+            return sanscript.transliterate(devanagari, sanscript.DEVANAGARI, self._resolve(self._target_key))
         source = self._resolve(self._source_key)
         target = self._resolve(self._target_key)
         converted = sanscript.transliterate(text, source, target)

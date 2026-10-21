@@ -20,20 +20,21 @@ from PySide6.QtCore import (
 )
 
 from ccgen.config.defaults import DubbingDefaults, LanguageOptions, TransliterationDefaults
-from ccgen.config.voices import ENGINE_LABELS, ENGINE_XTTS
+from ccgen.config import licences
+from ccgen.config.voices import ENGINE_LABELS
 from ccgen.controllers.task_ctrl import TaskController, subtitle_output_body, subtitle_output_from_settings
 from ccgen.controllers.task_tabs import (
     MEDIA_EXTS,
     VOICE_RESETS,
-    XTTS_TERMS_BLOCKER,
     DubController,
     GenerateController,
     TranslateController,
     TransliterateController,
-    xtts_terms_accepted,
+    dub_model,
+    translation_models,
 )
 from ccgen.core.tasks.configs import INPUT_SOURCE
-from ccgen.models.file_model import SUBTITLE_EXTS
+from ccgen.models.file_model import SUBTITLE_EXTS, effective_language
 
 _UserRole = Qt.ItemDataRole.UserRole
 
@@ -217,6 +218,8 @@ class WorkflowController(TaskController):
         self._steps_model.dataChanged.connect(lambda *_: self._schedule_validation())
         self._steps_model.modelReset.connect(self._schedule_validation)
         self._steps_model.countChanged.connect(self._schedule_validation)
+        for signal in (self._steps_model.dataChanged, self._steps_model.modelReset, self._steps_model.countChanged):
+            signal.connect(self.textLanguageChanged)
 
     @Property(QObject, constant=True)
     def steps(self) -> WorkflowStepsModel:
@@ -258,24 +261,37 @@ class WorkflowController(TaskController):
             self._steps_model.set_option(row, key, value)
 
     def extra_blocker(self) -> str:
-        uses_cloning = any(s["kind"] == "dub" and s["mode"] == ENGINE_XTTS for s in self._steps_model.steps)
-        if uses_cloning and not xtts_terms_accepted(self._saved_settings):
-            return XTTS_TERMS_BLOCKER
-        return ""
+        models: list[str] = []
+        for step in self._steps_model.steps:
+            if step["kind"] == "dub":
+                models.append(dub_model(step, self._saved_settings))
+            elif step["kind"] == "translate":
+                models += sorted(translation_models(step, self._saved_settings))
+        return licences.blocker(self._saved_settings, models)
 
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:
-        unknown = next((i for i in items if i.get("kind") == "subtitle" and not i.get("language")), None)
-        if unknown is None:
+        unknown = next((i for i in items if i.get("kind") == "subtitle" and not effective_language(i)), None)
+        step = self._step_reading_language()
+        if unknown is None or step is None:
             return ""
+        number, title = step
+        return (
+            f"{os.path.basename(unknown['path'])} has no known language, which step {number} ({title}) "
+            "needs. Choose its language in the queue, or set the step's language."
+        )
+
+    def needs_text_language(self) -> bool:
+        return self._step_reading_language() is not None
+
+    def _step_reading_language(self) -> Optional[tuple[int, str]]:
+        """(number, title) of the first step that takes the queued subtitle's language, or None."""
         for number, step in enumerate(self._steps_model.steps, start=1):
             detects = (step["kind"] == "translate" and step["source_lang"] == "auto") \
-                or (step["kind"] == "dub" and step["language"] == DubbingDefaults.LANGUAGE_AUTO)
+                or (step["kind"] == "dub" and step["language"] == DubbingDefaults.LANGUAGE_AUTO) \
+                or (step["kind"] == "transliterate" and step["source_scheme"] == TransliterationDefaults.SOURCE_AUTO)
             if detects and step.get("input") == INPUT_SOURCE:
-                return (
-                    f"{os.path.basename(unknown['path'])} has no language in its name. Choose the language "
-                    f"in step {number} ({step_title(step)}), or rename it with a suffix such as movie_en.srt."
-                )
-        return ""
+                return number, step_title(step)
+        return None
 
     def initial_options(self) -> dict[str, Any]:
         return subtitle_output_from_settings({})
@@ -312,16 +328,12 @@ class WorkflowController(TaskController):
             body = dict(step)
             if step["kind"] == "generate":
                 body.update(GenerateController.step_body(step))
-            elif step["kind"] == "translate" and step["source_lang"] == "auto" \
-                    and step.get("input") == INPUT_SOURCE and item.get("language"):
-                body["source_lang"] = item["language"]
-            elif step["kind"] == "dub" and step["language"] == DubbingDefaults.LANGUAGE_AUTO \
-                    and step.get("input") == INPUT_SOURCE and item.get("language"):
-                body["language"] = item["language"]
             steps.append(body)
+        # Steps on Automatic read the queued subtitle's language: from its name or its picker.
         return {
             "task": self.task_key,
             "input_path": item["path"],
             **subtitle_output_body(self._options, item["path"]),
             "steps": steps,
+            "text_language": effective_language(item),
         }

@@ -3,7 +3,7 @@
 import pytest
 from PySide6.QtCore import QCoreApplication
 
-from ccgen.models.file_model import MediaFileModel
+from ccgen.models.file_model import MediaFileModel, effective_language, has_text
 
 
 @pytest.fixture(scope="session")
@@ -201,3 +201,45 @@ class TestBulkOperations:
         model.addFiles(two_files)
         assert model.data(model.index(0), MediaFileModel.KindRole) == "video"
         assert model.data(model.index(1), MediaFileModel.KindRole) == "audio"
+
+
+class TestTextLanguage:
+    @pytest.fixture
+    def subtitles(self, tmp_path):
+        paths = []
+        for name in ("one.srt", "two_en.srt", "clip.mp4"):
+            (tmp_path / name).write_text("")
+            paths.append(str(tmp_path / name))
+        return paths
+
+    def test_language_comes_from_the_name_and_a_choice_overrides_it(self, model, subtitles):
+        model.addFiles(subtitles)
+        assert [effective_language(model.item(p)) for p in subtitles] == ["", "en", ""]
+        model.setChosenLanguage(1, "fr")
+        assert effective_language(model.item(subtitles[1])) == "fr"
+        model.setChosenLanguage(1, "")
+        assert effective_language(model.item(subtitles[1])) == "en"
+
+    def test_choice_applies_to_every_selected_row_with_text(self, model, subtitles):
+        model.addFiles(subtitles)
+        changes = []
+        model.inputsChanged.connect(lambda: changes.append(True))
+        model.selectAll()
+        model.setChosenLanguage(0, "ur")
+        assert [model.item(p)["chosen_language"] for p in subtitles] == ["ur", "ur", ""]
+        assert changes == [True]
+
+    def test_choice_on_an_unselected_row_changes_only_that_row(self, model, subtitles):
+        model.addFiles(subtitles)
+        model.setSingle(1)
+        model.setChosenLanguage(0, "ur")
+        assert [model.item(p)["chosen_language"] for p in subtitles] == ["ur", "", ""]
+
+    def test_pairing_resets_the_choice(self, model, subtitles):
+        model.addFiles(subtitles)
+        model.setCompanion(2, subtitles[1])
+        assert has_text(model.item(subtitles[2]))
+        model.setChosenLanguage(2, "de")
+        model.setCompanion(2, subtitles[0])
+        item = model.item(subtitles[2])
+        assert item["chosen_language"] == "" and item["language"] == ""

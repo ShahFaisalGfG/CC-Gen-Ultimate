@@ -7,7 +7,8 @@ import QtQuick.Layouts
 // Combo box for {label, code} option lists. Bind `value` to the option it shows; the box
 // follows it as it changes and flags a value missing from the list instead of silently showing
 // another one. `readiness` maps a code to true (downloaded) or false (downloads on first use)
-// and adds a badge to that row and to the tooltip.
+// and adds a badge to that row and to the tooltip. With `placeholderText`, a value missing from
+// the list shows the placeholder (an unanswered choice); `mustChoose` then flags it as required.
 ComboBox {
     id: control
 
@@ -15,12 +16,17 @@ ComboBox {
     property var readiness: ({})
     property string accessibleName: ""
     property string toolTipText: ""
+    property string placeholderText: ""
+    property bool mustChoose: false
     readonly property bool valueMissing: control.value !== undefined && control.value !== null
-        && control.count > 0 && control.indexOfValue(control.value) < 0
+        && control.placeholderText.length === 0 && control.count > 0 && control.indexOfValue(control.value) < 0
+    readonly property bool choiceMissing: control.mustChoose && control.currentIndex < 0
+    readonly property bool _warn: control.valueMissing || control.choiceMissing
 
     function selectCode(code) {
         var idx = control.indexOfValue(code)
         if (idx >= 0) control.currentIndex = idx
+        else if (control.placeholderText.length > 0) control.currentIndex = -1
     }
 
     function _sync() {
@@ -28,7 +34,9 @@ ComboBox {
     }
 
     onValueChanged: control._sync()
-    onCountChanged: control._sync()
+    // A new model resets the selection after these handlers run, so re-select once it settles.
+    onModelChanged: Qt.callLater(control._sync)
+    onCountChanged: Qt.callLater(control._sync)
     Component.onCompleted: control._sync()
 
     function _badge(code) {
@@ -49,6 +57,7 @@ ComboBox {
 
     ToolTip.visible: control.toolTipText.length > 0 && !control.popup.visible && (control.hovered || control.visualFocus)
     ToolTip.text: (control.valueMissing ? "The saved choice \"" + control.value + "\" isn't available here. Pick another.\n" : "")
+        + (control.choiceMissing ? "Required. " : "")
         + (control._badge(control.currentValue)
            ? control.toolTipText + "\n" + control.currentText + ": " + control._badge(control.currentValue).toLowerCase() + "."
            : control.toolTipText)
@@ -57,9 +66,10 @@ ComboBox {
     contentItem: Text {
         leftPadding: 10
         rightPadding: control.indicator.width + 6
-        text: control.displayText
+        readonly property bool showsPlaceholder: control.currentIndex < 0 && control.placeholderText.length > 0
+        text: showsPlaceholder ? control.placeholderText : control.displayText
         font: control.font
-        color: control.enabled ? Theme.text : Theme.textMuted
+        color: control.enabled && !showsPlaceholder ? Theme.text : Theme.textMuted
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
         Accessible.ignored: true
@@ -73,11 +83,33 @@ ComboBox {
         color: Theme.textMuted
     }
 
+    // Draws attention to a value the app changed on its own (for example after a test picked it):
+    // the box glows in the accent color twice and fades back.
+    function flash() { flashAnimation.restart() }
+
+    SequentialAnimation {
+        id: flashAnimation
+        loops: 2
+        NumberAnimation { target: flashFill; property: "opacity"; to: 0.3; duration: 250; easing.type: Easing.OutQuad }
+        NumberAnimation { target: flashFill; property: "opacity"; to: 0; duration: 850; easing.type: Easing.InQuad }
+    }
+
     background: Rectangle {
         radius: Theme.radius
-        color: control.hovered && control.enabled ? Theme.surfaceHover : Theme.surface
-        border.width: control.visualFocus || control.valueMissing ? 2 : 1
-        border.color: control.visualFocus ? Theme.focusRing : control.valueMissing ? Theme.warning : Theme.border
+        // Disabled boxes take the muted fill, so the whole box reads as disabled, not just its text.
+        color: !control.enabled ? Theme.surfaceAlt : control.hovered ? Theme.surfaceHover : Theme.surface
+        border.width: control.visualFocus || control._warn || flashFill.opacity > 0 ? 2 : 1
+        border.color: control.visualFocus ? Theme.focusRing
+            : control._warn ? Theme.warning
+            : flashFill.opacity > 0 ? Theme.accent : Theme.border
+
+        Rectangle {
+            id: flashFill
+            anchors.fill: parent
+            radius: parent.radius
+            color: Theme.accent
+            opacity: 0
+        }
     }
 
     delegate: ItemDelegate {

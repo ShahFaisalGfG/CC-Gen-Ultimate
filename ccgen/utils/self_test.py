@@ -24,6 +24,8 @@ Check = tuple[str, Callable[[], None]]
 
 _QML_DIR = "ccgen/qml"
 _SERVER_TIMEOUT_S = 15.0
+# The names Qt's OpenSSL backend loads; Python's own ssl module uses libssl-3.dll instead.
+_QT_OPENSSL_DLLS = ("libssl-3-x64.dll", "libcrypto-3-x64.dll")
 
 # The QApplication must outlive every QML engine, so it is kept for the rest of the process.
 _qt_app: Optional[object] = None
@@ -39,10 +41,26 @@ def _check_lazy_modules() -> None:
     from argostranslate.apply_bpe import BPE  # noqa: F401
     from argostranslate.sbd import MiniSBDSentencizer, StanzaSentencizer  # noqa: F401
     from sacremoses.tokenize import MosesDetokenizer, MosesTokenizer  # noqa: F401
+    from ctranslate2.converters import TransformersConverter  # noqa: F401 - prepares OPUS-MT models
+    from llama_cpp import llama_print_system_info  # Hy-MT2 translation; loads llama.cpp's DLLs
+    from tokenizers import Tokenizer  # noqa: F401 - the meaning check's tokenizer
+    from transformers import MarianMTModel  # noqa: F401 - loaded by name when converting OPUS-MT
     from transformers.models.auto.tokenization_auto import tokenizer_class_from_name
 
-    if tokenizer_class_from_name("M2M100Tokenizer") is None:
-        raise RuntimeError("transformers could not resolve M2M100Tokenizer")
+    if not llama_print_system_info():
+        raise RuntimeError("llama.cpp reported no system information")
+    # Transliteration (M2M100), OPUS-MT (Marian), NLLB, and OmniVoice (Qwen2) tokenizers are
+    # resolved by name.
+    for name in ("M2M100Tokenizer", "MarianTokenizer", "NllbTokenizerFast", "Qwen2TokenizerFast"):
+        if tokenizer_class_from_name(name) is None:
+            raise RuntimeError(f"transformers could not resolve {name}")
+    # OmniVoice builds its backbone (Qwen3) and audio codec (DAC, HuBERT) from config by name,
+    # and tells speakers apart with WavLM.
+    from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+    from transformers.models.auto.modeling_auto import MODEL_MAPPING
+
+    for model_type in ("qwen3", "dac", "hubert", "wavlm"):
+        MODEL_MAPPING[CONFIG_MAPPING[model_type]]  # raises when the model class wasn't bundled
 
 
 def _check_native_libraries() -> None:
@@ -93,7 +111,10 @@ def _check_speech_engines() -> None:
     from piper.phonemize_espeak import EspeakPhonemizer
     from TTS.tts.models.xtts import Xtts  # noqa: F401
 
-    from ccgen.engines.devices import describe_accelerators
+    from ccgen.engines.devices import EDITION_LABELS, built_architectures, describe_accelerators, torch_edition
+    from ccgen.engines.hardware import detect
+    from ccgen.engines.speech.omnivoice.audio import remove_silence
+    from ccgen.engines.speech.omnivoice.model import OmniVoice  # noqa: F401
 
     if not EspeakPhonemizer().phonemize("en-us", "hello"):
         raise RuntimeError("Piper's eSpeak returned no phonemes")
@@ -103,8 +124,15 @@ def _check_speech_engines() -> None:
         raise RuntimeError("Japanese romanization returned nothing")
     if not pypinyin.lazy_pinyin("你好"):
         raise RuntimeError("Chinese pinyin returned nothing")
+    tone = (0.3 * np.sin(np.arange(16000) * 0.05)).astype(np.float32)[None, :]
+    if remove_silence(tone, 16000).shape[-1] == 0:
+        raise RuntimeError("OmniVoice's silence trimming removed speech")
+    architectures = " ".join(built_architectures()) or "none"
+    print(f"    edition: {EDITION_LABELS[torch_edition()]} (GPU architectures: {architectures})")
     for runtime, devices in describe_accelerators().items():
         print(f"    {runtime}: {', '.join(devices)}")
+    hardware = detect()
+    print(f"    hardware: {hardware.summary} ({hardware.recommended} profile)")
 
 
 def _check_api_server() -> None:
@@ -155,6 +183,33 @@ def _check_qml() -> None:
             errors.extend(error.toString() for error in component.errors())
     if errors:
         raise RuntimeError("; ".join(errors))
+
+
+def _check_tls() -> None:
+    """Confirm a build leaves out Qt's OpenSSL backend and the OpenSSL DLLs it loads.
+
+    The first QtNetwork object loads that backend, which loads libssl-3-x64.dll from System32
+    before the bundle; on PCs where another program put a different OpenSSL there, the app
+    crashes with "entry point not found". See hooks/hook-PySide6.QtNetwork.py.
+    """
+    from PySide6.QtNetwork import QSslSocket
+
+    backends = QSslSocket.availableBackends()
+    if getattr(sys, "frozen", False):
+        folders = {os.path.dirname(sys.executable), getattr(sys, "_MEIPASS", "")} - {""}
+        found = [
+            os.path.join(folder, name)
+            for folder in sorted(folders)
+            for name in _QT_OPENSSL_DLLS
+            if os.path.isfile(os.path.join(folder, name))
+        ]
+        if found:
+            raise RuntimeError(f"the build bundles OpenSSL DLLs for Qt: {', '.join(found)}")
+        if "openssl" in backends:
+            raise RuntimeError("the build bundles Qt's OpenSSL TLS backend")
+    print(f"    Qt TLS backend: {QSslSocket.activeBackend()} (available: {', '.join(backends)})")
+
+
 CHECKS: list[Check] = [
     ("Engines", _check_engines),
     ("Lazily imported modules", _check_lazy_modules),
@@ -164,6 +219,7 @@ CHECKS: list[Check] = [
     ("Speech engines", _check_speech_engines),
     ("Embedded API server", _check_api_server),
     ("QML", _check_qml),
+    ("Qt TLS", _check_tls),
 ]
 
 

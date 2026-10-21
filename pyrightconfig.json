@@ -4,6 +4,7 @@
   "venv": ".venv",
   "typeCheckingMode": "standard",
   "include": ["ccgen", "main.py", "app.py", "server.py", "tests"],
+  "exclude": ["ccgen/engines/speech/omnivoice"],
   "reportMissingImports": "warning",
   "reportPrivateImportUsage": "none"
 }

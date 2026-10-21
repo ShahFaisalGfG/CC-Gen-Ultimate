@@ -6,6 +6,12 @@
 # and Kokoro) reaches NVIDIA through CUDA, AMD through ROCm, any DirectX 12 GPU through DirectML,
 # and Apple Silicon through CoreML. Which of these exist depends on the installed build, so every
 # choice is probed at run time and the CPU is always the last resort.
+#
+# Each edition of the app ships a PyTorch build compiled for a range of NVIDIA GPUs: the standard
+# edition (CUDA 12.8) runs on GeForce GTX 10 series cards up to RTX 50, the Legacy NVIDIA edition
+# (CUDA 12.6) on Maxwell cards such as the GTX 900 series and the 940MX up to RTX 40. A GPU outside
+# the build's range is skipped with a note naming the edition that can use it. A GPU too weak to
+# be sure of beating the CPU is timed against it, and the faster one is used.
 
 import logging
 import time
@@ -29,6 +35,15 @@ _ONNX_GPU_PROVIDERS = (
     ("CoreMLExecutionProvider", "Apple GPU (Core ML)"),
 )
 _ONNX_CPU = "CPUExecutionProvider"
+# A CUDA GPU at least this new and this large runs every model faster than any CPU, so it is used
+# without timing it against the CPU.
+_STRONG_CAPABILITY = (7, 0)
+_STRONG_VRAM_GB = 8.0
+# CTranslate2 compute types on a GPU, fastest first; float32 is the slow last resort of old GPUs.
+_CT2_GPU_TYPES = ("float16", "int8_float16", "int8", "float32")
+# The device each timed CTranslate2 model ran fastest on, by model and setting.
+_fastest_ct2: dict[tuple[str, str], str] = {}
+_GB = 1024 ** 3
 # The device each probed model ran fastest on, by model file and device setting. Hardware doesn't
 # change while the app runs, so later jobs open the model there directly: opening a session can
 # take seconds, and probing opens one per device.
@@ -48,6 +63,106 @@ class Accelerator:
         return self.label != "CPU"
 
 
+@dataclass(frozen=True)
+class CudaGpu:
+    """The first CUDA GPU, and whether this edition's PyTorch build can run on it."""
+
+    name: str
+    capability: tuple[int, int]
+    vram_gb: float
+    usable: bool
+    rocm: bool = False
+
+    @property
+    def strong(self) -> bool:
+        """True when the GPU outruns any CPU, so it needs no timing against one."""
+        return self.usable and (self.rocm or (self.capability >= _STRONG_CAPABILITY and self.vram_gb >= _STRONG_VRAM_GB))
+
+    @property
+    def note(self) -> str:
+        """Why the GPU goes unused and which edition can use it ("" when it is used)."""
+        if self.usable:
+            return ""
+        edition = "the standard edition" if self.capability >= (10, 0) else "the Legacy NVIDIA edition"
+        return f"needs {edition}"
+
+
+def cuda_gpu() -> Optional[CudaGpu]:
+    """The first GPU PyTorch reaches through CUDA (NVIDIA, or AMD on ROCm builds), or None."""
+    import torch
+
+    if not torch.cuda.is_available():
+        return None
+    properties = torch.cuda.get_device_properties(0)
+    capability = (properties.major, properties.minor)
+    # ROCm builds report AMD GPUs through the CUDA API and set torch.version.hip.
+    rocm = bool(getattr(getattr(torch, "version", None), "hip", None))
+    usable = rocm or arch_supported(capability, built_architectures())
+    return CudaGpu(properties.name, capability, properties.total_memory / _GB, usable, rocm)
+
+
+def built_architectures() -> list[str]:
+    """The GPU architectures this PyTorch build carries code for, e.g. ["sm_61", "sm_120"]
+    (empty for CPU and Intel builds). Read from the build itself, so it works without a GPU."""
+    import torch
+
+    try:
+        flags = getattr(torch._C, "_cuda_getArchFlags", None)
+        names = str(flags() or "").split() if flags is not None else torch.cuda.get_arch_list()
+        return [str(name) for name in names]
+    except Exception:
+        _log.debug("Reading the build's GPU architectures failed", exc_info=True)
+        return []
+
+
+def arch_supported(capability: tuple[int, int], architectures: list[str]) -> bool:
+    """True when a build compiled for `architectures` (e.g. ["sm_61", "compute_90"]) runs on a
+    GPU of compute `capability`: it has a binary for the same major version and an equal or
+    lower minor one, or PTX code for an equal or lower version, which the driver compiles.
+    An empty list means the build doesn't say, so the GPU is tried."""
+    if not architectures:
+        return True
+    for arch in architectures:
+        kind, _, number = arch.partition("_")
+        if not number.isdigit():
+            continue
+        built = (int(number) // 10, int(number) % 10)
+        if kind == "sm" and built[0] == capability[0] and built[1] <= capability[1]:
+            return True
+        if kind == "compute" and built <= capability:
+            return True
+    return False
+
+
+def torch_edition() -> str:
+    """Which edition's PyTorch build is installed: "cuda" (CUDA 12.8 or newer), "legacy" (an
+    older CUDA, for Maxwell GPUs), "xpu" (Intel GPUs), or "cpu"."""
+    import torch
+
+    version = getattr(torch, "version", None)
+    if getattr(version, "xpu", None):
+        return "xpu"
+    cuda = getattr(version, "cuda", None)
+    if not cuda:
+        return "cpu"
+    major, _, minor = cuda.partition(".")
+    return "cuda" if (int(major), int(minor or 0)) >= (12, 8) else "legacy"
+
+
+EDITION_LABELS = {"cuda": "Standard", "legacy": "Legacy NVIDIA", "xpu": "Intel GPU", "cpu": "CPU only"}
+
+
+def release_gpu_memory() -> None:
+    """Hand back GPU memory a failed attempt left cached, so the next device starts clean."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        _log.debug("Releasing GPU memory failed", exc_info=True)
+
+
 def torch_accelerators(preference: str = DEVICE_AUTO) -> list[Accelerator]:
     """Return torch devices to try in order, ending with the CPU."""
     import torch
@@ -57,11 +172,12 @@ def torch_accelerators(preference: str = DEVICE_AUTO) -> list[Accelerator]:
         return [cpu]
     found: list[Accelerator] = []
     try:
-        if torch.cuda.is_available():
-            # ROCm builds of torch report AMD GPUs through the CUDA API and set torch.version.hip.
-            hip = getattr(getattr(torch, "version", None), "hip", None)
-            vendor = "AMD GPU (ROCm)" if hip else "NVIDIA GPU (CUDA)"
-            found.append(Accelerator(torch.device("cuda"), f"{vendor}: {torch.cuda.get_device_name(0)}"))
+        gpu = cuda_gpu()
+        if gpu is not None and gpu.usable:
+            vendor = "AMD GPU (ROCm)" if gpu.rocm else "NVIDIA GPU (CUDA)"
+            found.append(Accelerator(torch.device("cuda"), f"{vendor}: {gpu.name}"))
+        elif gpu is not None:
+            _log.info("%s %s, so it isn't used", gpu.name, gpu.note)
         xpu = getattr(torch, "xpu", None)
         if xpu is not None and xpu.is_available():
             found.append(Accelerator(torch.device("xpu"), f"Intel GPU (XPU): {xpu.get_device_name(0)}"))
@@ -136,7 +252,7 @@ def onnx_session(
 def fastest_working(
     accelerators: list[Accelerator],
     load: Callable[[Accelerator], _T],
-    probe: Callable[[_T], None],
+    probe: Callable[[_T], object],
 ) -> tuple[_T, Accelerator]:
     """Load on every accelerator, time `probe` on each, and keep the fastest that works.
 
@@ -161,6 +277,53 @@ def fastest_working(
         ", ".join(f"{a.label}: {s * 1000:.0f} ms" for s, _, a in timed),
     )
     return value, accelerator
+
+
+def ct2_gpu_compute_type() -> Optional[str]:
+    """The fastest compute type CTranslate2 offers on the first CUDA GPU, or None without one
+    (older GPUs offer only float32)."""
+    import ctranslate2
+
+    try:
+        if ctranslate2.get_cuda_device_count() <= 0:
+            return None
+        supported = ctranslate2.get_supported_compute_types("cuda")
+    except Exception:
+        _log.debug("CTranslate2 CUDA query failed", exc_info=True)
+        return None
+    return next((kind for kind in _CT2_GPU_TYPES if kind in supported), None)
+
+
+def ct2_open(
+    key: str,
+    open_model: Callable[[str, str], _T],
+    probe: Callable[[_T], object],
+    compute_type: str = "auto",
+) -> tuple[_T, str, str]:
+    """Open a CTranslate2 model (`open_model(device, compute_type)`) on the GPU or the CPU.
+
+    The GPU runs its fastest type, or `compute_type` when one is given; a GPU that fails falls
+    back to the CPU in 8-bit. A GPU that offers only float32 is timed against the CPU once per
+    session, since an old GPU in float32 can lose to it. Returns the model, its device, and its
+    compute type.
+    """
+    gpu_type = ct2_gpu_compute_type()
+    cpu = Accelerator(("cpu", "int8"), "CPU")
+    if gpu_type is None:
+        return open_model("cpu", "int8"), "cpu", "int8"
+    if compute_type != "auto":
+        gpu_type = compute_type
+    gpu = Accelerator(("cuda", gpu_type), "GPU")
+    known = _fastest_ct2.get((key, gpu_type))
+    if gpu_type != "float32" or compute_type != "auto" or known == "GPU":
+        model, chosen = first_working([gpu, cpu], lambda a: open_model(*a.handle))
+    elif known == "CPU":
+        model, chosen = open_model("cpu", "int8"), cpu
+    else:
+        model, chosen = fastest_working([gpu, cpu], lambda a: open_model(*a.handle), probe)
+        _fastest_ct2[(key, gpu_type)] = chosen.label
+    device, compute_type = chosen.handle
+    return model, device, compute_type
 
 
 def first_working(

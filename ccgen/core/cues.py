@@ -10,6 +10,7 @@
 # spread_translation() maps the translated sentence back onto the original cues' timing.
 
 import math
+import re
 from dataclasses import dataclass, replace
 from typing import Optional
 
@@ -19,6 +20,15 @@ from ccgen.core import Segment, TranslatedSegment, WordToken
 _SENTENCE_END = (".", "?", "!", "\u2026", "\u3002", "\uff1f", "\uff01", "\u061f", "\u06d4", "\u0964")
 _CLAUSE_END = (",", ";", ":", "\u2013", "\u2014", "\u060c", "\uff0c", "\u3001")
 _CLOSING_MARKS = "\"')]}\u201d\u2019\u00bb"
+# A full stop after one of these words, or after a single capital letter (an initial), shortens
+# a word instead of ending a sentence: "Dr. Smith" stays in one translation unit and one cue.
+# "No." is left out (it is far more often an answer than "number"), as are "I." and "A.".
+_ABBREVIATIONS = frozenset({
+    "mr", "mrs", "ms", "dr", "prof", "sr", "sra", "jr", "st", "vs", "e.g", "i.e", "approx", "fig",
+    "nr", "bzw", "z.b", "ca", "mme", "mlle", "dra",
+})
+_LAST_WORD = re.compile(r"(\S+)\.$")
+_OPENING_MARKS = "(\"'\u201c\u2018\u00ab"
 # A sentence end closes a cue only once it holds this share of a full cue, so a short
 # interjection ("Yes.") can share a cue with the next sentence instead of flashing by alone.
 _SENTENCE_CLOSE_SHARE = 0.5
@@ -72,8 +82,18 @@ def is_no_space_language(language: Optional[str]) -> bool:
 
 
 def ends_sentence(text: str) -> bool:
-    """Return True when text ends with sentence-final punctuation (ignoring closing quotes)."""
-    return text.rstrip().rstrip(_CLOSING_MARKS).endswith(_SENTENCE_END)
+    """Return True when text ends with sentence-final punctuation (ignoring closing quotes).
+
+    A full stop closing a common abbreviation or an initial ("Dr.", "e.g.", "J.") doesn't count.
+    """
+    text = text.rstrip().rstrip(_CLOSING_MARKS)
+    if not text.endswith(_SENTENCE_END):
+        return False
+    last = _LAST_WORD.search(text)
+    if last is None or text.endswith(".."):
+        return True
+    word = last.group(1).lstrip(_OPENING_MARKS)
+    return not (word.lower() in _ABBREVIATIONS or (len(word) == 1 and word.isupper() and word not in "IA"))
 
 
 class CueBuilder:

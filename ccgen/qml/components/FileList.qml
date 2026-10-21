@@ -21,6 +21,9 @@ FocusScope {
     property var sendTargets: []
     // True on the Dub tab, where a media row can be paired with the subtitle it speaks.
     property bool allowCompanion: false
+    // Languages a subtitle row's picker offers ([{ label, code }]), and whether the tab needs one.
+    property var languageOptions: []
+    property bool languageRequired: false
 
     signal addFilesRequested()
     signal addFolderRequested()
@@ -206,6 +209,9 @@ FocusScope {
                 width: ListView.view.width - listView.leftMargin - listView.rightMargin
                 current: ListView.isCurrentItem
                 listHasFocus: listView.activeFocus
+                languageOptions: root.languageOptions
+                languageRequired: root.languageRequired
+                onLanguageChosen: (index, language) => root.fileModel.setChosenLanguage(index, language)
                 onClicked: (index, modifiers) => root._click(index, modifiers)
                 onContextMenuRequested: index => root._openMenu(index)
                 onRemoveRequested: index => root.fileModel.removeAt(index)
@@ -283,6 +289,32 @@ FocusScope {
             height: visible ? implicitHeight : 0
             onTriggered: root.companionRequested(contextMenu.row)
         }
+        MenuItem {
+            text: "Transcribe instead"
+            visible: root.allowCompanion && (contextMenu.info.companion || "").length > 0
+            height: visible ? implicitHeight : 0
+            onTriggered: root.fileModel.setCompanion(contextMenu.row, "")
+        }
+        // The same choice as the row's picker, reachable from the keyboard (Menu or Shift+F10).
+        Menu {
+            title: "Language"
+            enabled: contextMenu.info.kind === "subtitle" || (contextMenu.info.companion || "").length > 0
+            MenuItem {
+                text: "Auto (from the file name)"
+                enabled: (contextMenu.info.language || "").length > 0
+                onTriggered: root.fileModel.setChosenLanguage(contextMenu.row, "")
+            }
+            Repeater {
+                model: root.languageOptions
+                delegate: MenuItem {
+                    required property var modelData
+                    text: modelData.label
+                    checkable: true
+                    checked: contextMenu.info.chosen_language === modelData.code
+                    onTriggered: root.fileModel.setChosenLanguage(contextMenu.row, modelData.code)
+                }
+            }
+        }
         MenuSeparator {}
         MenuItem {
             text: root.fileModel.selectedCount > 1 ? "Remove " + root.fileModel.selectedCount + " selected" : "Remove"
@@ -313,7 +345,7 @@ FocusScope {
             anchors.fill: parent
             anchors.margins: Theme.spaceXs
             radius: Theme.radiusLarge
-            color: Theme.dark ? "#332a6fd6" : "#1a0b62c4"
+            color: Theme.dropFill
             border.color: Theme.accent
             border.width: 2
             visible: dropArea.containsDrag

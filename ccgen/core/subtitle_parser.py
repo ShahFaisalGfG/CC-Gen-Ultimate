@@ -1,5 +1,6 @@
 # subtitle_parser.py — parse SRT, VTT, LRC, ASS/SSA, and SBV files into Segment lists
 
+import html
 import logging
 import os
 import re
@@ -17,6 +18,10 @@ _SBV_SPLIT = re.compile(r"\s*,\s*")
 _LRC_LAST_LINE_DURATION_S = 4.0
 _LRC_LINE = re.compile(r"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$")
 _ASS_OVERRIDE_TAG = re.compile(r"\{.*?\}")
+# Styling inside SRT, VTT, and SBV text: HTML-like tags (<i>, <font color=...>, VTT <v Speaker>,
+# <c.class>, and <00:01.000> karaoke timestamps) and ASS-style position tags ({\an8}). They are
+# formatting, not words, so they are never translated, transliterated, or spoken.
+_MARKUP_TAG = re.compile(r"</?(?:[a-zA-Z][^<>]*|\d[\d:.]*)>|\{\\[^}]*\}")
 
 
 def parse_subtitle(path: str) -> list[Segment]:
@@ -143,6 +148,11 @@ def _strip_ass_tags(text: str) -> str:
     return text.replace("\\N", " ").replace("\\n", " ").replace("\\h", " ").strip()
 
 
+def _strip_markup(text: str) -> str:
+    """Remove styling tags and decode HTML entities (&amp;) from a cue's text."""
+    return " ".join(html.unescape(_MARKUP_TAG.sub("", text)).split())
+
+
 def _split_blocks(text: str) -> list[list[str]]:
     """Split raw subtitle text into non-empty line groups."""
     blocks: list[list[str]] = []
@@ -169,7 +179,7 @@ def _build_segment(
         return None
     start = _to_seconds(parts[0], comma_sep)
     end   = _to_seconds(parts[1].split()[0], comma_sep)  # drop optional cue settings
-    body  = " ".join(lines[time_line + 1:])
+    body  = _strip_markup(" ".join(lines[time_line + 1:]))
     if not body:
         return None
     return Segment(id=idx, start=start, end=end, text=body, words=[], language="")

@@ -2,12 +2,13 @@
 #
 # Names follow the input file: movie.mp4 -> movie.srt (transcript), movie_ur.srt (translation),
 # movie_tr_ur_roman.srt (transliteration), movie_dub_ur.mkv (dub). A trailing language suffix on
-# a subtitle input is dropped first, so translating movie_en.srt to Urdu gives movie_ur.srt.
+# a subtitle input (movie_en.srt, movie.en.srt) is dropped first, so translating it to Urdu gives
+# movie_ur.srt.
 
 import os
 from typing import Callable, Optional
 
-from ccgen.config.capabilities import language_from_filename
+from ccgen.config.capabilities import split_language
 from ccgen.core.cues import CueLayout
 from ccgen.core.subtitle import derive_output_path, write_ass, write_lrc, write_sbv, write_srt, write_vtt
 from ccgen.core.subtitle_parser import is_subtitle
@@ -23,15 +24,12 @@ _WRITERS: dict[str, Callable[..., str]] = {
 
 
 def output_base(input_path: str) -> str:
-    """Return a subtitle input's path without the trailing `_xx` language suffix it carries.
+    """Return a subtitle input's path without the language tag its name ends with.
 
-    Media names are kept whole, so `talk_en.mp4` and `talk_ur.mp4` never share an output name.
+    `movie_en.srt` and `movie.en.srt` both give `movie.srt`. Media names are kept whole, so
+    `talk_en.mp4` and `talk_ur.mp4` never share an output name.
     """
-    language = language_from_filename(input_path) if is_subtitle(input_path) else ""
-    root, ext = os.path.splitext(input_path)
-    if language and root.lower().endswith(f"_{language}"):
-        root = root[: -len(language) - 1]
-    return root + ext
+    return split_language(input_path)[0] if is_subtitle(input_path) else input_path
 
 
 def output_path(input_path: str, suffix: str, ext: str, output_dir: Optional[str]) -> str:

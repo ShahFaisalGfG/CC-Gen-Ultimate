@@ -5,6 +5,7 @@ from typing import Optional
 
 import numpy as np
 
+from ccgen.config.profiles import whisper_model
 from ccgen.core import Segment
 from ccgen.core.audio import load_audio
 from ccgen.core.cues import CueBuilder, CueLayout, finalize_timing
@@ -68,7 +69,8 @@ class GenerateTask(Task[GenerateConfig]):
         super().__init__(config)
         self._layout = CueLayout(max_line_length=config.max_line_length, max_lines=config.max_lines)
         self._engine = create_caption_engine(
-            model_name=config.model_name, device=config.device, compute_type=config.compute_type,
+            model_name=whisper_model(config.model_name, config.profile), device=config.device,
+            compute_type=config.compute_type,
         )
 
     @property

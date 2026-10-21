@@ -78,7 +78,7 @@ class TestReferenceClips:
         cues = [_cue(0, 2), _cue(2, 10), _cue(10, 20)]
         audio = np.full(20 * _RATE, 0.5, dtype=np.float32)
         refs = reference_clips(cues, audio, _RATE, [0, 0, 0])
-        assert [clip.size // _RATE for clip in refs[0]] == [10, 8]
+        assert [clip.size / _RATE for clip in refs[0]] == [10.25, 8.5]  # each widened by REFERENCE_PAD_S
 
     def test_one_entry_per_speaker(self):
         cues = [_cue(0, 2), _cue(2, 4)]

@@ -1,7 +1,7 @@
 # test_task_dub.py - unit tests for track assembly, muxing, and the dub task
 
 import wave
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import av
 import numpy as np
@@ -10,7 +10,7 @@ import pytest
 from ccgen.core.dubbing import TRACK_RATE, attach_track, synthesize_track
 from ccgen.core.tasks.configs import DubConfig
 from ccgen.core.tasks.dub import DubTask
-from ccgen.engines.speech.base import CloningEngine, SpeechEngine, split_for_speech
+from ccgen.engines.speech.base import CloningEngine, SpeechEngine, finish_sentence, split_for_speech
 
 _ENGINE_RATE = 24000
 
@@ -94,9 +94,9 @@ class TestSynthesizeTrack:
 
     def test_speeds_up_speech_that_overruns_its_slot(self, tmp_path):
         engine = FakeEngine()
-        cues = [_cue(0, 0.0, 1.0, "a" * 12), _cue(1, 1.0, 2.0, "b")]
+        cues = [_cue(0, 0.0, 1.0, "a" * 11 + "."), _cue(1, 1.0, 2.0, "b.")]
         report = synthesize_track(cues, [0, 0], engine, 1.35, str(tmp_path / "t.wav"))
-        assert engine.calls[1] == ("a" * 12, 1.2, 0)
+        assert engine.calls[1] == ("a" * 11 + ".", 1.2, 0)
         assert report.sped_up == 1 and report.trimmed == []
 
     def test_speed_up_uses_the_engines_cheaper_retime(self, tmp_path):
@@ -106,21 +106,64 @@ class TestSynthesizeTrack:
                 return super().synthesize(text, speed, speaker)
 
         engine = Retimer()
-        cues = [_cue(0, 0.0, 1.0, "a" * 12), _cue(1, 1.0, 2.0, "b")]
+        cues = [_cue(0, 0.0, 1.0, "a" * 11 + "."), _cue(1, 1.0, 2.0, "b.")]
         synthesize_track(cues, [0, 0], engine, 1.35, str(tmp_path / "t.wav"))
         assert engine.calls[1] == ("retime", 1.2, 0)
 
     def test_trims_and_warns_when_speed_up_is_not_enough(self, tmp_path):
-        cues = [_cue(0, 0.0, 1.0, "a" * 30), _cue(1, 1.0, 2.0, "b")]
+        cues = [_cue(0, 0.0, 1.0, "a" * 29 + "."), _cue(1, 1.0, 2.0, "b.")]
         report = synthesize_track(cues, [0, 0], FakeEngine(), 1.35, str(tmp_path / "t.wav"))
         assert report.trimmed == [1]
         assert "1 line(s) were too long" in report.warnings()[0]
-        assert _read_track(str(tmp_path / "t.wav"))[TRACK_RATE - 1] == 0  # faded to silence at the slot end
+        # Faded to silence a second past the slot end, where the next line then starts.
+        assert _read_track(str(tmp_path / "t.wav"))[2 * TRACK_RATE - 1] == 0
 
-    def test_overlapping_cue_starts_after_the_previous_speech(self, tmp_path):
-        cues = [_cue(0, 0.0, 0.5, "abc"), _cue(1, 0.2, 2.0, "d")]
-        synthesize_track(cues, [0, 0], FakeEngine(), 1.0, str(tmp_path / "t.wav"))
-        assert _read_track(str(tmp_path / "t.wav")).size == int(0.2 * TRACK_RATE) + int(0.1 * TRACK_RATE)
+    def test_overrun_within_a_second_delays_the_next_line(self, tmp_path):
+        cues = [_cue(0, 0.0, 0.5, "abc."), _cue(1, 0.2, 2.0, "d.")]
+        report = synthesize_track(cues, [0, 0], FakeEngine(), 1.0, str(tmp_path / "t.wav"))
+        assert report.trimmed == []
+        assert _read_track(str(tmp_path / "t.wav")).size == int(0.4 * TRACK_RATE) + int(0.2 * TRACK_RATE)
+
+    def test_the_last_line_is_sped_up_to_end_with_the_media(self, tmp_path):
+        engine = FakeEngine()
+        cues = [_cue(0, 0.0, 1.0, "a" * 9 + ".")]
+        report = synthesize_track(cues, [0], engine, 1.35, str(tmp_path / "t.wav"), end=0.8)
+        assert engine.calls[-1][1] == pytest.approx(1.25)
+        assert report.trimmed == []
+        assert _read_track(str(tmp_path / "t.wav")).size <= int(0.8 * TRACK_RATE)
+
+    def test_speech_past_the_media_end_is_cut_and_reported(self, tmp_path):
+        cues = [_cue(0, 0.0, 1.0, "a" * 19 + ".")]
+        report = synthesize_track(cues, [0], FakeEngine(), 1.35, str(tmp_path / "t.wav"), end=1.0)
+        assert report.trimmed == [1]
+        assert _read_track(str(tmp_path / "t.wav")).size == TRACK_RATE
+
+    def test_a_line_starting_after_the_media_ends_is_reported_not_spoken(self, tmp_path):
+        engine = FakeEngine()
+        cues = [_cue(0, 0.0, 1.0, "a."), _cue(1, 3.0, 4.0, "b.")]
+        report = synthesize_track(cues, [0, 0], engine, 1.35, str(tmp_path / "t.wav"), end=2.0)
+        assert [c[0] for c in engine.calls] == ["a."]
+        assert report.trimmed == [2] and report.spoken == 1
+
+    def test_a_sentence_over_several_cues_is_spoken_once_in_their_time(self, tmp_path):
+        engine = FakeEngine()
+        cues = [_cue(0, 0.0, 1.0, "one two"), _cue(1, 1.0, 2.0, "three."), _cue(2, 2.0, 3.0, "four.")]
+        report = synthesize_track(cues, [0, 0, 0], engine, 1.35, str(tmp_path / "t.wav"))
+        assert [c[0] for c in engine.calls] == ["one two three.", "four."]
+        assert engine.calls[0][1] == 1.0  # 1.4 s fits the two cues' 2 s, so no speed-up
+        assert report.spoken == 2
+
+    def test_a_sentence_is_split_where_the_speaker_changes(self, tmp_path):
+        engine = FakeEngine()
+        cues = [_cue(0, 0.0, 1.0, "hello"), _cue(1, 1.0, 2.0, "there.")]
+        synthesize_track(cues, [0, 1], engine, 1.35, str(tmp_path / "t.wav"))
+        assert [(c[0], c[2]) for c in engine.calls] == [("hello", 0), ("there.", 1)]
+
+    def test_chinese_cues_are_joined_without_spaces(self, tmp_path):
+        engine = FakeEngine()
+        cues = [_cue(0, 0.0, 1.0, "你好"), _cue(1, 1.0, 2.0, "世界。")]
+        synthesize_track(cues, [0, 0], engine, 1.35, str(tmp_path / "t.wav"), language="zh")
+        assert engine.calls[0][0] == "你好世界。"
 
     def test_passes_each_cues_speaker(self, tmp_path):
         engine = FakeEngine()
@@ -193,6 +236,10 @@ class TestDubConfig:
         with pytest.raises(ValueError, match="separate WAV"):
             DubConfig(input_path=str(tmp_path / "a_es.srt"))
 
+    def test_unknown_quality_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="voice cloning quality"):
+            DubConfig(input_path=str(tmp_path / "a.mp4"), subtitle_path=str(tmp_path / "a.srt"), quality="slow")
+
     def test_speed_up_range(self, tmp_path):
         with pytest.raises(ValueError, match="speed-up"):
             DubConfig(input_path=str(tmp_path / "a.mp4"), subtitle_path=str(tmp_path / "a.srt"), max_speedup=5)
@@ -209,7 +256,12 @@ class TestDubTask:
         return tmp_path
 
     def _run(self, config, engine):
-        with patch("ccgen.core.tasks.dub.create_engine", return_value=engine):
+        heard = MagicMock()
+        heard.transcribe.side_effect = lambda audio, language=None, vad_filter=False: [{"text": "hola adios"}]
+        with (
+            patch("ccgen.core.tasks.dub.create_engine", return_value=engine),
+            patch("ccgen.core.tasks.dub.load_transcriber", return_value=heard),
+        ):
             task = DubTask(config)
             task.prepare()
             return task.run()
@@ -243,6 +295,96 @@ class TestDubTask:
         cfg = DubConfig(input_path=str(files / "movie.mp4"), subtitle_path=str(files / "movie.srt"))
         with pytest.raises(ValueError, match="Choose the speech language"):
             DubTask(cfg).prepare()
+
+
+class _Checker:
+    """Line check stand-in that fails the first `bad` takes of every line."""
+
+    def __init__(self, bad: int) -> None:
+        self.bad = bad
+        self.seen: dict[str, int] = {}
+
+    def score(self, audio, rate, text):
+        self.seen[text] = self.seen.get(text, 0) + 1
+        return 0.9 if self.seen[text] <= self.bad else 0.1
+
+
+class TestLineCheck:
+    def test_a_garbled_line_is_spoken_again(self, tmp_path):
+        engine = FakeEngine()
+        report = synthesize_track([_cue(0, 0.0, 2.0, "abc")], [0], engine, 1.35, str(tmp_path / "t.wav"),
+                                  checker=_Checker(bad=1))
+        assert len(engine.calls) == 2
+        assert (report.retaken, report.unclear, report.warnings()) == ([1], [], [])
+
+    def test_a_line_still_unclear_after_every_retake_is_reported(self, tmp_path):
+        engine = FakeEngine()
+        report = synthesize_track([_cue(0, 0.0, 2.0, "abc")], [0], engine, 1.35, str(tmp_path / "t.wav"),
+                                  checker=_Checker(bad=5))
+        assert len(engine.calls) == 3
+        assert report.unclear == [1]
+        assert "may be hard to understand" in report.warnings()[0]
+
+    def test_clear_lines_are_spoken_once(self, tmp_path):
+        engine = FakeEngine()
+        synthesize_track([_cue(0, 0.0, 2.0, "abc")], [0], engine, 1.35, str(tmp_path / "t.wav"), checker=_Checker(bad=0))
+        assert len(engine.calls) == 1
+
+
+class TestCharacterErrorRate:
+    def test_case_punctuation_and_spacing_are_ignored(self):
+        from ccgen.engines.speech.line_check import character_error_rate
+
+        assert character_error_rate("hello world", "Hello, World!", "en") == 0.0
+        assert character_error_rate("يہ ايک", "یہ ایک", "ur") == 0.0
+        assert character_error_rate("", "abc", "en") == 1.0
+
+    def test_run_on_speech_counts(self):
+        from ccgen.engines.speech.line_check import run_on
+
+        assert run_on("one two three four", "one two", "en") > 0.3
+        assert run_on("one", "one two", "en") == 0.0
+
+
+class TestLineChecker:
+    def _score(self, heard, text, language):
+        from ccgen.engines.speech.line_check import LineChecker
+
+        transcriber = MagicMock()
+        transcriber.transcribe.return_value = [{"text": heard}]
+        return LineChecker(transcriber, language).score(np.zeros(16000, np.float32), 16000, text)
+
+    def test_names_in_latin_letters_are_not_held_against_a_native_script_line(self):
+        assert self._score("میرا نام ابھیشیک ہے", "میرا نام Abhishek ہے", "ur") == 0.0
+
+    def test_a_garbled_line_with_a_name_still_fails(self):
+        from ccgen.engines.speech.line_check import FAILED_CER
+
+        assert self._score("یہاں تر نتا مدس", "میرا نام Abhishek ہے اور خوش آمدید", "ur") >= FAILED_CER
+
+    def test_a_line_of_only_latin_words_cannot_fail(self):
+        assert self._score("ایم ایل آپس", "ML Ops", "ur") == 0.0
+
+    def test_garbled_and_run_on_speech_fails(self):
+        from ccgen.engines.speech.line_check import FAILED_CER
+
+        assert self._score("یہاں تر نتا", "بھی جوڑے ہیں", "ur") >= FAILED_CER
+        assert self._score("hello there and then some more words", "hello there", "en") >= FAILED_CER
+
+
+class TestFinishSentence:
+    @pytest.mark.parametrize("text, language, spoken", [
+        ("my name is", "en", "my name is."),
+        ("मेरा नाम", "hi", "मेरा नाम।"),
+        ("میرا نام", "ur", "میرا نام۔"),
+        ("私の名前は", "ja", "私の名前は。"),
+        ("Hello, world!", "en", "Hello, world!"),
+        ("and then,", "en", "and then,"),
+        ('He said "stop"', "en", 'He said "stop"'),
+        ("  ", "en", ""),
+    ])
+    def test_lines_end_with_the_languages_full_stop(self, text, language, spoken):
+        assert finish_sentence(text, language) == spoken
 
 
 class TestSplitForSpeech:

@@ -15,6 +15,7 @@ from PySide6.QtCore import Property, QObject, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWebSockets import QWebSocket
 
 from ccgen.config.defaults import OutputDefaults
+from ccgen.config.profiles import effective_profile
 from ccgen.controllers.api_client import ApiClient
 from ccgen.core.tasks.configs import SUBTITLE_FORMATS
 from ccgen.models.file_model import (
@@ -51,6 +52,7 @@ class TaskController(QObject):
     segmentAdded      = Signal(int, float, float, str, str, int)  # (id, start, end, text, kind, step)
     fileStarted       = Signal(str, str)        # (path, file name)
     notice            = Signal(str)             # one-off message shown to the user
+    textLanguageChanged = Signal()
 
     def __init__(self, base_url: str, parent=None):
         super().__init__(parent)
@@ -91,6 +93,7 @@ class TaskController(QObject):
         self._validate_timer.timeout.connect(self._validate)
         self._file_model.countChanged.connect(lambda _count: self._schedule_validation())
         self._file_model.inputsChanged.connect(self._schedule_validation)
+        self.optionsChanged.connect(self.textLanguageChanged)
 
         self._api.get("/settings", self._on_defaults_fetched)
 
@@ -113,6 +116,10 @@ class TaskController(QObject):
         """
         raise NotImplementedError
 
+    def _job(self, item: dict[str, Any], validating: bool = False) -> dict[str, Any]:
+        """The job body with the saved performance profile, which resolves every Automatic choice."""
+        return {**self.job_body(item, validating), "profile": effective_profile(self._saved_settings)}
+
     def add_paths(self, paths: list[str]) -> None:
         """Add files to the queue (the Dub tab pairs subtitles with their media here)."""
         self._file_model.addFiles(paths)
@@ -124,6 +131,10 @@ class TaskController(QObject):
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:
         """Why a queued file can't run with the current options, or "" when all of them can."""
         return ""
+
+    def needs_text_language(self) -> bool:
+        """Whether every subtitle's language must be known to run with the current options."""
+        return False
 
     # ── Queue and status properties ──────────────────────────────────────────
 
@@ -246,6 +257,11 @@ class TaskController(QObject):
         """Re-seed options from saved preferences, keeping any option changed in this session."""
         self._api.get("/settings", self._on_defaults_fetched)
 
+    @Property(bool, notify=textLanguageChanged)
+    def needsSubtitleLanguage(self) -> bool:
+        """True when a subtitle row without a known language blocks Start (its picker is required)."""
+        return self.needs_text_language()
+
     @Property(str, notify=blockerChanged)
     def blocker(self) -> str:
         """Why Start is unavailable right now, or "" when the queue can run."""
@@ -365,7 +381,7 @@ class TaskController(QObject):
             self._set_stage("Starting...", -1.0)
             self.fileStarted.emit(path, os.path.basename(path))
             try:
-                body = self.job_body(item)
+                body = self._job(item)
             except ValueError as e:
                 self._record_result({"success": False, "error": str(e)})
                 continue
@@ -512,7 +528,7 @@ class TaskController(QObject):
             return
         item = items[0] if items else {"path": self.sample_input, "language": "", "companion": "", "kind": ""}
         try:
-            body = self.job_body(item, validating=True)
+            body = self._job(item, validating=True)
         except ValueError as e:
             self._set_server_errors([str(e)])
             return
@@ -597,6 +613,11 @@ class TaskController(QObject):
 def _path_key(path: str) -> str:
     """Comparable form of a path, for looking files up by name."""
     return os.path.normcase(os.path.normpath(path))
+
+
+def missing_language(path: str) -> str:
+    """The blocker for a subtitle whose language is neither in its name nor chosen."""
+    return f"Choose the language of {os.path.basename(path)} in the queue."
 
 
 def subtitle_output_options() -> dict[str, Any]:

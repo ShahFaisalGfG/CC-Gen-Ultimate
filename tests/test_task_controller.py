@@ -12,7 +12,7 @@ from ccgen.controllers.task_tabs import (
     DubController,
     GenerateController,
     TranslateController,
-    find_companion,
+    TransliterateController,
 )
 from ccgen.models.file_model import MediaFileModel
 
@@ -232,8 +232,13 @@ class TestOptions:
         assert controller.blocker == "Add a video or audio file to the queue first."
 
 
+def _steps(body):
+    """The kinds of a workflow job's steps, in order."""
+    return [step["kind"] for step in body["steps"]]
+
+
 class TestTranslateTab:
-    def test_detect_uses_language_handed_over(self, tmp_path):
+    def test_uses_language_handed_over(self, tmp_path):
         ctrl = _make(TranslateController)
         sub = tmp_path / "movie.srt"
         sub.write_text("")
@@ -244,6 +249,7 @@ class TestTranslateTab:
 
     def test_each_output_keeps_the_language_the_job_reported(self, tmp_path):
         ctrl = _make(TranslateController)
+        ctrl.setOption("target_lang", "ur")
         sub = tmp_path / "movie_en.srt"
         sub.write_text("")
         ctrl.addFiles([str(sub)])
@@ -261,22 +267,126 @@ class TestTranslateTab:
         assert ctrl.fileModel.item(str(first))["language"] == "en"
         assert ctrl.fileModel.item(str(second))["language"] == "ur"
 
-    def test_detect_blocks_a_file_of_unknown_language(self, tmp_path):
+    def test_subtitle_of_unknown_language_blocks_until_chosen(self, tmp_path):
         ctrl = _make(TranslateController)
         (tmp_path / "movie.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "movie.srt")])
+        assert ctrl.needsSubtitleLanguage
         ctrl._validate()
-        assert ctrl.blocker.startswith("movie.srt has no language in its name.")
+        assert ctrl.blocker == "Choose the language of movie.srt in the queue."
         assert ctrl._api.posts == []
-        ctrl.setOption("source_lang", "en")
+        ctrl.fileModel.setChosenLanguage(0, "fr")
         ctrl._validate()
         assert ctrl.blocker == ""
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["source_lang"] == "fr"
+
+    def test_chosen_language_overrides_the_file_name(self, tmp_path):
+        ctrl = _make(TranslateController)
+        ctrl.setOption("target_lang", "ur")
+        (tmp_path / "movie.en.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "movie.en.srt")])
+        assert ctrl.fileModel.item(str(tmp_path / "movie.en.srt"))["language"] == "en"
+        ctrl.fileModel.setChosenLanguage(0, "es")
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["source_lang"] == "es"
+
+    def test_subtitle_already_in_the_target_blocks(self, tmp_path):
+        ctrl = _make(TranslateController)
+        ctrl.setOption("target_lang", "en")
+        (tmp_path / "movie_en.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "movie_en.srt")])
+        ctrl._validate()
+        assert ctrl.blocker.startswith("movie_en.srt is already in English.")
+
+    def test_video_is_transcribed_then_translated(self, tmp_path):
+        ctrl = _make(TranslateController)
+        ctrl.setOption("target_lang", "ur")
+        (tmp_path / "talk.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "talk.mp4")])
+        ctrl.startQueue()
+        body = ctrl._api.jobs()[0]
+        assert body["task"] == "workflow" and _steps(body) == ["generate", "translate"]
+        generate, translate = body["steps"]
+        assert generate["write_output"] is False and generate["language"] is None
+        assert translate["input"] == "step:0" and translate["source_lang"] == "auto"
+        assert translate["target_lang"] == "ur" and translate["write_output"] is True
+
+    def test_spoken_language_is_passed_to_transcription(self, tmp_path):
+        ctrl = _make(TranslateController)
+        ctrl.setOption("spoken_language", "ja")
+        ctrl.setOption("target_lang", "en")
+        (tmp_path / "talk.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "talk.mp4")])
+        ctrl.startQueue()
+        generate, translate = ctrl._api.jobs()[0]["steps"]
+        assert generate["language"] == "ja" and translate["source_lang"] == "ja"
+
+    def test_spoken_language_equal_to_the_target_blocks(self, tmp_path):
+        ctrl = _make(TranslateController)
+        ctrl.setOption("spoken_language", "en")
+        ctrl.setOption("target_lang", "en")
+        (tmp_path / "talk.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "talk.mp4")])
+        ctrl._validate()
+        assert ctrl.blocker.startswith("The spoken language is English")
+
+
+class TestTransliterateTab:
+    def test_video_converts_from_the_script_of_the_speech(self, tmp_path):
+        ctrl = _make(TransliterateController)
+        ctrl.setOption("target_scheme", "roman")
+        (tmp_path / "talk.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "talk.mp4")])
+        ctrl.startQueue()
+        body = ctrl._api.jobs()[0]
+        assert _steps(body) == ["generate", "transliterate"]
+        assert body["steps"][1]["source_scheme"] == "auto"
+
+    def test_explicit_script_needs_no_language(self, tmp_path):
+        ctrl = _make(TransliterateController)
+        (tmp_path / "song.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "song.srt")])
+        assert not ctrl.needsSubtitleLanguage
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["source_scheme"] == "roman"
+
+    def test_automatic_script_follows_the_subtitle_language(self, tmp_path):
+        ctrl = _make(TransliterateController)
+        ctrl.setOption("source_scheme", "auto")
+        ctrl.setOption("target_scheme", "roman")
+        (tmp_path / "song.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "song.srt")])
+        assert ctrl.needsSubtitleLanguage
+        ctrl._validate()
+        assert ctrl.blocker == "Choose the language of song.srt in the queue."
+        ctrl.fileModel.setChosenLanguage(0, "ur")
+        ctrl._validate()
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["source_scheme"] == "ur"
+
+    def test_automatic_script_rejects_text_already_in_the_target(self, tmp_path):
+        ctrl = _make(TransliterateController)
+        ctrl.setOption("source_scheme", "auto")
+        ctrl.setOption("target_scheme", "roman")
+        (tmp_path / "song_en.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "song_en.srt")])
+        ctrl._validate()
+        assert ctrl.blocker.startswith("song_en.srt is already written in that script.")
+
+    def test_automatic_script_rejects_a_language_without_one(self, tmp_path):
+        ctrl = _make(TransliterateController)
+        ctrl.setOption("source_scheme", "auto")
+        (tmp_path / "song_ja.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "song_ja.srt")])
+        ctrl._validate()
+        assert ctrl.blocker == "Transliteration doesn't support Japanese's script (song_ja.srt)."
 
 
 def _dub():
-    """A Dub tab whose user already accepted the voice cloning licence."""
+    """A Dub tab whose user already accepted the voice cloning licences."""
     ctrl = _make(DubController)
-    ctrl._saved_settings = {"dubbing": {"xtts_terms_accepted": True}}
+    ctrl._saved_settings = {"dubbing": {"omnivoice_terms_accepted": True, "xtts_terms_accepted": True}}
     return ctrl
 
 
@@ -285,65 +395,113 @@ class TestDubTab:
         ctrl = _make(DubController)
         (tmp_path / "movie_es.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "movie_es.srt")])
+        # Automatic resolves to OmniVoice, whose licence comes first.
+        assert "OmniVoice licence" in ctrl.blocker
+        ctrl.setOption("mode", "xtts")
         assert "XTTS-v2 licence" in ctrl.blocker
         ctrl.setOption("mode", "piper")
         assert ctrl.blocker == ""
 
-    def test_subtitle_pairs_with_its_media(self, tmp_path):
+    def test_jobs_carry_the_saved_profile(self, tmp_path):
         ctrl = _dub()
+        ctrl._saved_settings["performance"] = {"profile": "balanced"}
+        (tmp_path / "talk_es.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "talk_es.srt")])
+        ctrl.startQueue()
+        assert ctrl._api.jobs()[0]["profile"] == "balanced"
+
+    def test_custom_profile_jobs_carry_the_recommended_profile_and_quality(self, tmp_path):
+        ctrl = _dub()
+        ctrl._saved_settings["performance"] = {"profile": "custom", "recommended": "balanced"}
+        ctrl.setOption("quality", "full")
+        (tmp_path / "talk_es.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "talk_es.srt")])
+        ctrl.startQueue()
+        job = ctrl._api.jobs()[0]
+        assert job["profile"] == "balanced" and job["steps"][-1]["quality"] == "full"
+
+    def test_video_alone_is_transcribed_translated_and_dubbed(self, tmp_path):
+        ctrl = _dub()
+        ctrl.setOption("language", "es")
+        (tmp_path / "movie.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "movie.mp4")])
+        ctrl._validate()
+        assert not ctrl.blocker.startswith("Choose")
+        ctrl.startQueue()
+        body = ctrl._api.jobs()[0]
+        assert body["task"] == "workflow" and "text_path" not in body
+        assert _steps(body) == ["generate", "translate", "dub"]
+        assert body["steps"][1]["source_lang"] == "auto" and body["steps"][1]["target_lang"] == "es"
+        assert body["steps"][2]["input"] == "step:1" and body["steps"][2]["language"] == "es"
+        assert body["steps"][2]["output"] == "track"
+
+    def test_translation_is_skipped_when_spoken_in_the_dub_language(self, tmp_path):
+        ctrl = _dub()
+        ctrl.setOption("spoken_language", "es")
+        ctrl.setOption("language", "es")
+        (tmp_path / "movie.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "movie.mp4")])
+        ctrl.startQueue()
+        body = ctrl._api.jobs()[0]
+        assert _steps(body) == ["generate", "dub"] and body["steps"][1]["input"] == "step:0"
+
+    def test_keep_the_spoken_language_never_translates(self, tmp_path):
+        ctrl = _dub()
+        ctrl.setOption("language", "auto")
+        (tmp_path / "movie.mp4").write_bytes(b"x")
+        ctrl.addFiles([str(tmp_path / "movie.mp4")])
+        ctrl.startQueue()
+        body = ctrl._api.jobs()[0]
+        assert _steps(body) == ["generate", "dub"] and body["steps"][1]["language"] == "auto"
+
+    def test_paired_subtitle_is_spoken_instead_of_a_transcript(self, tmp_path):
+        ctrl = _dub()
+        ctrl.setOption("language", "es")
         (tmp_path / "movie.mp4").write_bytes(b"x")
         (tmp_path / "movie_es.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "movie_es.srt")])
         assert ctrl.fileModel.getPaths() == [str(tmp_path / "movie.mp4")]
         ctrl.startQueue()
         body = ctrl._api.jobs()[0]
-        assert body["subtitle_path"] == str(tmp_path / "movie_es.srt")
-        assert body["language"] == "es"
+        assert body["text_path"] == str(tmp_path / "movie_es.srt") and body["text_language"] == "es"
+        assert _steps(body) == ["dub"] and body["steps"][0]["input"] == "source"
+
+    def test_paired_subtitle_in_another_language_is_translated(self, tmp_path):
+        ctrl = _dub()
+        ctrl.setOption("language", "ur")
+        (tmp_path / "movie.mp4").write_bytes(b"x")
+        (tmp_path / "movie_es.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "movie_es.srt")])
+        ctrl.startQueue()
+        body = ctrl._api.jobs()[0]
+        assert _steps(body) == ["translate", "dub"]
+        assert body["steps"][0]["source_lang"] == "es" and body["steps"][0]["write_output"] is False
+
+    def test_transcribe_instead_drops_the_pairing(self, tmp_path):
+        ctrl = _dub()
+        (tmp_path / "movie.mp4").write_bytes(b"x")
+        (tmp_path / "movie_es.srt").write_text("")
+        ctrl.addFiles([str(tmp_path / "movie_es.srt")])
+        ctrl.fileModel.setCompanion(0, "")
+        ctrl.startQueue()
+        assert _steps(ctrl._api.jobs()[0])[0] == "generate"
 
     def test_lone_subtitle_becomes_a_wav(self, tmp_path):
         ctrl = _dub()
         (tmp_path / "talk_es.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "talk_es.srt")])
         ctrl.startQueue()
-        assert ctrl._api.jobs()[0]["output"] == "wav"
-
-    def test_media_without_subtitle_fails_with_a_reason(self, tmp_path):
-        ctrl = _dub()
-        (tmp_path / "movie.mp4").write_bytes(b"x")
-        ctrl.addFiles([str(tmp_path / "movie.mp4")])
-        ctrl.startQueue()
-        assert ctrl._api.jobs() == []
-        message = ctrl.fileModel.data(ctrl.fileModel.index(0), MediaFileModel.MessageRole)
-        assert message.startswith("No subtitle found for movie.mp4")
-
-    def test_media_without_subtitle_blocks_start(self, tmp_path):
-        ctrl = _dub()
-        (tmp_path / "movie.mp4").write_bytes(b"x")
-        ctrl.addFiles([str(tmp_path / "movie.mp4")])
-        ctrl._validate()
-        assert ctrl.blocker.startswith("No subtitle found for movie.mp4")
-
-    def test_choosing_a_subtitle_rechecks_the_queue(self, tmp_path):
-        ctrl = _dub()
-        for name in ("movie.mp4", "movie_es.srt", "movie_fr.srt"):
-            (tmp_path / name).write_text("")
-        ctrl.addFiles([str(tmp_path / "movie.mp4")])
-        ctrl._validate()
-        assert "has several subtitles" in ctrl.blocker
-        rechecks = []
-        ctrl.fileModel.inputsChanged.connect(lambda: rechecks.append(True))
-        ctrl.fileModel.setCompanion(0, str(tmp_path / "movie_fr.srt"))
-        assert rechecks and ctrl._validate_timer.isActive()
-        ctrl._validate()
-        assert ctrl.blocker == ""
+        body = ctrl._api.jobs()[0]
+        assert body["input_path"] == str(tmp_path / "talk_es.srt")
+        assert body["steps"][-1]["output"] == "wav"
 
     def test_subtitle_of_unknown_language_blocks_start(self, tmp_path):
         ctrl = _dub()
         (tmp_path / "talk.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "talk.srt")])
         ctrl._validate()
-        assert ctrl.blocker.startswith("talk.srt has no language in its name.")
-        ctrl.setOption("language", "es")
+        assert ctrl.blocker == "Choose the language of talk.srt in the queue."
+        ctrl.fileModel.setChosenLanguage(0, "es")
         ctrl._validate()
         assert ctrl.blocker == ""
 
@@ -355,11 +513,11 @@ class TestDubTab:
         item = ctrl.fileModel.item(str(tmp_path / "movie.mp4"))
         assert item["companion"] == str(tmp_path / "movie_ur.srt") and item["language"] == "ur"
 
-    def test_many_files_without_subtitles_fail_without_overflowing_the_stack(self, tmp_path):
+    def test_many_files_that_cannot_start_fail_without_overflowing_the_stack(self, tmp_path):
         ctrl = _dub()
         ctrl.setOption("mode", "piper")
         for index in range(1500):
-            (tmp_path / f"clip{index}.mp4").write_bytes(b"")
+            (tmp_path / f"clip{index}.srt").write_text("")
         ctrl.addFiles([str(p) for p in tmp_path.iterdir()])
         ctrl.startQueue()
         assert not ctrl.busy
@@ -370,8 +528,13 @@ class TestDubTab:
         for name in ("movie.mp4", "movie_es.srt", "movie_fr.srt"):
             (tmp_path / name).write_text("")
         ctrl.addFiles([str(tmp_path / "movie_es.srt")])
+        ctrl.fileModel.setChosenLanguage(0, "de")
+        rechecks = []
+        ctrl.fileModel.inputsChanged.connect(lambda: rechecks.append(True))
         ctrl.fileModel.setCompanion(0, str(tmp_path / "movie_fr.srt"))
-        assert ctrl.fileModel.item(str(tmp_path / "movie.mp4"))["language"] == "fr"
+        item = ctrl.fileModel.item(str(tmp_path / "movie.mp4"))
+        assert item["language"] == "fr" and item["chosen_language"] == ""
+        assert rechecks and ctrl._validate_timer.isActive()
 
     def test_changing_mode_or_language_resets_a_chosen_voice(self):
         ctrl = _dub()
@@ -387,21 +550,3 @@ class TestDubTab:
         ctrl = _make(DubController)
         assert len(ctrl.voiceOptions("xtts", "en")) == 1
         assert any(v["code"] == "piper:ur_PK-fasih-medium" for v in ctrl.voiceOptions("piper", "ur"))
-
-
-class TestFindCompanion:
-    def test_prefers_the_chosen_language(self, tmp_path):
-        for name in ("m.mp4", "m_es.srt", "m_ur.srt"):
-            (tmp_path / name).write_text("")
-        assert find_companion(str(tmp_path / "m.mp4"), "ur").endswith("m_ur.srt")
-
-    def test_single_candidate_is_used(self, tmp_path):
-        for name in ("m.mp4", "m.srt", "other_es.srt"):
-            (tmp_path / name).write_text("")
-        assert find_companion(str(tmp_path / "m.mp4"), "auto").endswith("m.srt")
-
-    def test_several_candidates_need_a_choice(self, tmp_path):
-        for name in ("m.mp4", "m_es.srt", "m_ur.srt"):
-            (tmp_path / name).write_text("")
-        with pytest.raises(ValueError, match="several subtitles"):
-            find_companion(str(tmp_path / "m.mp4"), "auto")

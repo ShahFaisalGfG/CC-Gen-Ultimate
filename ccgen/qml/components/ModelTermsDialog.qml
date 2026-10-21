@@ -3,16 +3,19 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// One-time notice for the XTTS-v2 voice cloning model's licence (Coqui Public Model License).
+// One-time licence notice for a model whose licence allows non-commercial use only (OmniVoice
+// and XTTS-v2 voice cloning, NLLB-200 translation). The text comes from ccgen/config/licences.py.
 // Accepting is saved in preferences; `accepted()` lets the caller continue what it started.
-Dialog {
+AppDialog {
     id: dialog
+
+    // Which model's licence to show: "omnivoice", "xtts", or "nllb".
+    property string model: "omnivoice"
+    readonly property var terms: prefsController.modelTerms(dialog.model)
 
     signal accepted()
 
-    title: "XTTS-v2 licence"
-    modal: true
-    anchors.centerIn: parent
+    title: dialog.terms.title
     width: Math.min(520, parent ? parent.width - 48 : 520)
     standardButtons: Dialog.Cancel
 
@@ -24,9 +27,7 @@ Dialog {
 
         Text {
             Layout.fillWidth: true
-            text: "Voice cloning uses the XTTS-v2 model by Coqui, released under the Coqui Public Model "
-                + "License. It allows personal, research, and other non-commercial use of the model and "
-                + "of the audio it creates. Commercial use needs a separate licence."
+            text: dialog.terms.body
             wrapMode: Text.WordWrap
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
@@ -34,7 +35,7 @@ Dialog {
         }
         Text {
             Layout.fillWidth: true
-            text: "Only clone voices you have permission to use. Kokoro and Piper voices have no such limits."
+            text: dialog.terms.note
             wrapMode: Text.WordWrap
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
@@ -47,8 +48,8 @@ Dialog {
                 kind: "ghost"
                 text: "Read the licence"
                 iconName: "openExternal"
-                toolTipText: "Open coqui.ai/cpml in your browser"
-                onClicked: Qt.openUrlExternally("https://coqui.ai/cpml")
+                toolTipText: "Open " + dialog.terms.site + " in your browser"
+                onClicked: Qt.openUrlExternally(dialog.terms.url)
             }
             Item { Layout.fillWidth: true }
             AppButton {
@@ -57,7 +58,9 @@ Dialog {
                 text: "I agree"
                 toolTipText: "Accept the licence and continue"
                 onClicked: {
-                    prefsController.saveSettings({ "dubbing.xtts_terms_accepted": true })
+                    var values = {}
+                    values[dialog.terms.setting] = true
+                    prefsController.saveSettings(values)
                     dialog.close()
                     dialog.accepted()
                 }
