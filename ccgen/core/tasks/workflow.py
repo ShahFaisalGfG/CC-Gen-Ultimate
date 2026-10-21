@@ -7,7 +7,8 @@
 import logging
 from typing import Optional
 
-from ccgen.config.defaults import DubbingDefaults
+from ccgen.config.capabilities import language_name, script_for_language
+from ccgen.config.defaults import DubbingDefaults, TransliterationDefaults
 from ccgen.config.profiles import transliteration_engine, whisper_model
 from ccgen.core.audio import load_audio
 from ccgen.core.cues import CueLayout
@@ -20,6 +21,7 @@ from ccgen.core.tasks.configs import (
     TransliterateStep,
     WorkflowConfig,
     step_input_index,
+    validate_transliterate,
 )
 from ccgen.core.tasks.dub import DUB_STAGES, Dubber, dub_settings
 from ccgen.core.tasks.generate import transcribe
@@ -86,7 +88,7 @@ class WorkflowTask(Task[WorkflowConfig]):
                 continue
             source = step_input_index(step.input)
             if source is None:
-                source_track = source_track or load_subtitle_track(cfg.input_path)
+                source_track = source_track or load_subtitle_track(cfg.source_text_path, cfg.text_language)
                 text = source_track
             else:
                 text = tracks[source]
@@ -96,14 +98,9 @@ class WorkflowTask(Task[WorkflowConfig]):
                 if step.write_output:
                     files += self._write(track, f"_{step.target_lang}", languages, ctx)
             elif isinstance(step, TransliterateStep):
-                ctx.begin("transliterate", "Transliterating...")
-                engine = create_transliteration_engine(
-                    transliteration_engine(step.engine, self.config.profile, step.source_scheme, step.target_scheme),
-                    source_scheme=step.source_scheme, target_scheme=step.target_scheme,
-                )
-                track = transliterate_track(text, engine, step.source_scheme, step.target_scheme, ctx)
+                track, source_scheme = self._transliterate(step, text, ctx)
                 if step.write_output:
-                    suffix = transliteration_suffix(step.source_scheme, step.target_scheme)
+                    suffix = transliteration_suffix(source_scheme, step.target_scheme)
                     files += self._write(track, suffix, languages, ctx)
             else:
                 path, language = self._dub(step, text, ctx)
@@ -141,8 +138,33 @@ class WorkflowTask(Task[WorkflowConfig]):
         source = text.language if step.source_lang == "auto" else step.source_lang
         if not source:
             raise ValueError("The language of this step's input is unknown. Choose its source language.")
+        if source == step.target_lang:
+            # Only an "auto" source gets here: a detected language that is already the target.
+            ctx.warn(f"The text is already in {language_name(source)}, so it was kept as it is.")
+            return Track(cues=text.cues, language=source, script=text.script)
         engine, meaning = create_translator(step.engine, source, step.target_lang, self.config.profile, for_speech)
         return translate_track(text, engine, source, step.target_lang, ctx, meaning)
+
+    def _transliterate(self, step: TransliterateStep, text: Track, ctx: RunContext) -> tuple[Track, str]:
+        """Convert an earlier step's text to the step's script; return (track, source script).
+
+        An "auto" source script is the script of the text's language, which a generate step
+        only learns while transcribing, so the pair is checked here.
+        """
+        ctx.begin("transliterate", "Transliterating...")
+        source = step.source_scheme
+        if source == TransliterationDefaults.SOURCE_AUTO:
+            source = text.script or script_for_language(text.language)
+            if not source:
+                raise ValueError(
+                    f"Transliteration doesn't support {language_name(text.language) or 'this language'}'s script."
+                )
+            validate_transliterate(step.engine, source, step.target_scheme, self.config.profile)
+        engine = create_transliteration_engine(
+            transliteration_engine(step.engine, self.config.profile, source, step.target_scheme),
+            source_scheme=source, target_scheme=step.target_scheme,
+        )
+        return transliterate_track(text, engine, source, step.target_scheme, ctx), source
 
     def _dub(self, step: DubStep, text: Track, ctx: RunContext) -> tuple[str, str]:
         """Speak an earlier step's text and add it to the workflow's media; return (path, language)."""

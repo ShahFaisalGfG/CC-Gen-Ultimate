@@ -105,14 +105,25 @@ class TestJobBody:
         ctrl.removeStep(0)
         body = ctrl.job_body({"path": str(tmp_path / "m.srt"), "language": "en", "companion": ""})
         assert body["steps"][0]["input"] == "source"
-        assert body["steps"][0]["source_lang"] == "en"
+        assert body["text_language"] == "en"
+
+    def test_chosen_language_wins_over_the_file_name(self, ctrl, tmp_path):
+        ctrl.removeStep(0)
+        item = {"path": str(tmp_path / "m_en.srt"), "language": "en", "chosen_language": "fr", "companion": ""}
+        assert ctrl.job_body(item)["text_language"] == "fr"
 
     def test_step_detecting_the_language_of_an_unnamed_subtitle_blocks_start(self, ctrl, tmp_path):
         (tmp_path / "talk.srt").write_text("")
         ctrl.removeStep(0)
         ctrl.addFiles([str(tmp_path / "talk.srt")])
         ctrl._validate()
-        assert ctrl.blocker.startswith("talk.srt has no language in its name. Choose the language in step 1")
+        assert ctrl.needsSubtitleLanguage
+        assert ctrl.blocker.startswith("talk.srt has no known language, which step 1")
         ctrl.setStepOption(0, "source_lang", "en")
+        assert not ctrl.needsSubtitleLanguage
         ctrl._validate()
-        assert "no language in its name" not in ctrl.blocker
+        assert "no known language" not in ctrl.blocker
+        ctrl.setStepOption(0, "source_lang", "auto")
+        ctrl.fileModel.setChosenLanguage(0, "fr")
+        ctrl._validate()
+        assert "no known language" not in ctrl.blocker

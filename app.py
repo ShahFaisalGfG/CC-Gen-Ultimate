@@ -67,6 +67,7 @@ class _Startup:
             TransliterateController,
         )
         from ccgen.controllers.workflow_ctrl import WorkflowController
+        from ccgen.models.file_model import SUBTITLE_EXTS
 
         try:
             _log.info("Embedded API server ready at %s", api_server.base_url)
@@ -96,7 +97,7 @@ class _Startup:
                 # subtitles generated, subtitle files are offered for translation.
                 task_ctrls["generateController"].addFiles(self._input_paths)
                 task_ctrls["translateController"].addFiles(
-                    [p for p in self._input_paths if os.path.splitext(p)[1].lower() in TranslateController.accepted_exts]
+                    [p for p in self._input_paths if os.path.splitext(p)[1].lower() in SUBTITLE_EXTS]
                 )
                 _log.info("Queued %d file(s) from command line", len(self._input_paths))
 

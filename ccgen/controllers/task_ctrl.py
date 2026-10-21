@@ -52,6 +52,7 @@ class TaskController(QObject):
     segmentAdded      = Signal(int, float, float, str, str, int)  # (id, start, end, text, kind, step)
     fileStarted       = Signal(str, str)        # (path, file name)
     notice            = Signal(str)             # one-off message shown to the user
+    textLanguageChanged = Signal()
 
     def __init__(self, base_url: str, parent=None):
         super().__init__(parent)
@@ -92,6 +93,7 @@ class TaskController(QObject):
         self._validate_timer.timeout.connect(self._validate)
         self._file_model.countChanged.connect(lambda _count: self._schedule_validation())
         self._file_model.inputsChanged.connect(self._schedule_validation)
+        self.optionsChanged.connect(self.textLanguageChanged)
 
         self._api.get("/settings", self._on_defaults_fetched)
 
@@ -129,6 +131,10 @@ class TaskController(QObject):
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:
         """Why a queued file can't run with the current options, or "" when all of them can."""
         return ""
+
+    def needs_text_language(self) -> bool:
+        """Whether every subtitle's language must be known to run with the current options."""
+        return False
 
     # ── Queue and status properties ──────────────────────────────────────────
 
@@ -250,6 +256,11 @@ class TaskController(QObject):
     def reloadDefaults(self) -> None:
         """Re-seed options from saved preferences, keeping any option changed in this session."""
         self._api.get("/settings", self._on_defaults_fetched)
+
+    @Property(bool, notify=textLanguageChanged)
+    def needsSubtitleLanguage(self) -> bool:
+        """True when a subtitle row without a known language blocks Start (its picker is required)."""
+        return self.needs_text_language()
 
     @Property(str, notify=blockerChanged)
     def blocker(self) -> str:
@@ -602,6 +613,11 @@ class TaskController(QObject):
 def _path_key(path: str) -> str:
     """Comparable form of a path, for looking files up by name."""
     return os.path.normcase(os.path.normpath(path))
+
+
+def missing_language(path: str) -> str:
+    """The blocker for a subtitle whose language is neither in its name nor chosen."""
+    return f"Choose the language of {os.path.basename(path)} in the queue."
 
 
 def subtitle_output_options() -> dict[str, Any]:

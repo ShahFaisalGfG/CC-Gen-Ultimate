@@ -8,6 +8,8 @@ ColumnLayout {
     id: root
 
     property var options: ({})
+    // The Transliterate tab also takes videos and audio, transcribed first in the spoken language.
+    property bool forTab: false
     signal optionChanged(string key, var value)
 
     readonly property string neuralAsset: modelsController.neuralAssetId(root.options.source_scheme || "", root.options.target_scheme || "")
@@ -23,13 +25,22 @@ ColumnLayout {
         description: "Rewrites the text in another script, e.g. Urdu as natural Roman Urdu."
         iconName: "characters"
 
+        SpokenLanguageRow {
+            visible: root.forTab
+            value: root.options.spoken_language || ""
+            onChanged: value => root.optionChanged("spoken_language", value)
+        }
+
         FormRow {
             label: "Scripts"
+            hint: root.options.source_scheme === "auto"
+                ? "Automatic converts from the script of the text's language, e.g. Urdu (Nastaliq) for Urdu."
+                : root.forTab ? "Videos and audio always convert from the script of the language spoken." : ""
             StyledComboBox {
                 Layout.fillWidth: true
                 accessibleName: "Transliterate from script"
                 toolTipText: "Script the text is written in."
-                model: prefsController.translitSchemeOptions
+                model: prefsController.translitSourceOptions
                 value: root.options.source_scheme
                 onActivated: root.optionChanged("source_scheme", currentValue)
             }

@@ -20,3 +20,4 @@ TitleBar 1.0 TitleBar.qml
 Toast 1.0 Toast.qml
 ModelTermsDialog 1.0 ModelTermsDialog.qml
 LicenceBanner 1.0 LicenceBanner.qml
+SpokenLanguageRow 1.0 SpokenLanguageRow.qml

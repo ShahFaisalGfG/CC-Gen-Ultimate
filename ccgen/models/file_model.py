@@ -51,6 +51,7 @@ class MediaFileModel(QAbstractListModel):
     OutputsRole   = _UserRole + 11
     LanguageRole  = _UserRole + 12
     CompanionRole = _UserRole + 13
+    ChosenLanguageRole = _UserRole + 14
 
     countChanged      = Signal(int)
     totalSizeChanged  = Signal()
@@ -90,6 +91,7 @@ class MediaFileModel(QAbstractListModel):
             case self.OutputsRole:  return item["outputs"]
             case self.LanguageRole: return item["language"]
             case self.CompanionRole: return item["companion"]
+            case self.ChosenLanguageRole: return item["chosen_language"]
         if role == Qt.ItemDataRole.DisplayRole:
             return item["name"]
         return None
@@ -109,6 +111,7 @@ class MediaFileModel(QAbstractListModel):
             self.OutputsRole:  b"outputs",
             self.LanguageRole: b"language",
             self.CompanionRole: b"companion",
+            self.ChosenLanguageRole: b"chosenLanguage",
         }
 
     # ── Adding rows ──────────────────────────────────────────────────────────
@@ -241,7 +244,29 @@ class MediaFileModel(QAbstractListModel):
         if 0 <= row < len(self._files):
             companion = os.path.normpath(path) if path else ""
             # The row speaks the new subtitle, so its language comes from that file's name.
-            self._update(row, companion=companion, language=language_from_filename(companion) if companion else "")
+            self._update(
+                row, companion=companion, language=language_from_filename(companion) if companion else "",
+                chosen_language="",
+            )
+
+    @Slot(int, str)
+    def setChosenLanguage(self, row: int, language: str) -> None:
+        """Set the language the user picked for a row's text ("" goes back to the known one).
+
+        When the row is part of a selection, every selected row with text gets it, so a folder
+        of unlabelled subtitles is set in one go.
+        """
+        if not 0 <= row < len(self._files):
+            return
+        rows = [row]
+        if self._files[row]["selected"] and self._selected_count > 1:
+            rows = [r for r, item in enumerate(self._files) if item["selected"] and has_text(item)]
+        changed = [r for r in rows if self._files[r]["chosen_language"] != language]
+        for r in changed:
+            self._files[r]["chosen_language"] = language
+        if changed:
+            self.dataChanged.emit(self.index(changed[0]), self.index(changed[-1]), [self.ChosenLanguageRole])
+            self.inputsChanged.emit()
 
     def set_companion(self, path: str, companion: str, language: str = "") -> None:
         """Pair the row for `path` with a subtitle file, optionally recording its language."""
@@ -315,7 +340,10 @@ class MediaFileModel(QAbstractListModel):
         if not 0 <= row < len(self._files):
             return {}
         item = self._files[row]
-        return {key: item[key] for key in ("path", "kind", "status", "outputs", "companion", "language")}
+        return {
+            key: item[key]
+            for key in ("path", "kind", "status", "outputs", "companion", "language", "chosen_language")
+        }
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -338,8 +366,10 @@ class MediaFileModel(QAbstractListModel):
             "message": "",
             "outputs": [],
             "selected": False,
-            # Language of the file's text: from a `_xx` name suffix, a detection, or a hand-off.
+            # Language of the file's text: from its name (movie_en.srt), a detection, or a hand-off.
             "language": language_from_filename(path) if kind == "subtitle" else "",
+            # The language the user picked for the text, overriding "language" ("" for Auto).
+            "chosen_language": "",
             # For dubbing: the subtitle file a media row speaks.
             "companion": "",
         }
@@ -412,6 +442,7 @@ class MediaFileModel(QAbstractListModel):
             "status": self.StatusRole, "progress": self.ProgressRole,
             "message": self.MessageRole, "outputs": self.OutputsRole,
             "language": self.LanguageRole, "companion": self.CompanionRole,
+            "chosen_language": self.ChosenLanguageRole,
         }
         item = self._files[row]
         roles = [role_for[k] for k, v in fields.items() if item.get(k) != v]
@@ -422,7 +453,7 @@ class MediaFileModel(QAbstractListModel):
         self.dataChanged.emit(idx, idx, roles)
         if "status" in fields:
             self.statusCountsChanged.emit()
-        if self.LanguageRole in roles or self.CompanionRole in roles:
+        if {self.LanguageRole, self.CompanionRole, self.ChosenLanguageRole} & set(roles):
             self.inputsChanged.emit()
 
     def _row_of(self, path: str) -> int:
@@ -432,3 +463,13 @@ class MediaFileModel(QAbstractListModel):
     def _reindex(self) -> None:
         """Rebuild the path-to-row index after rows were removed."""
         self._rows = {os.path.normcase(item["path"]): row for row, item in enumerate(self._files)}
+
+
+def has_text(item: dict[str, Any]) -> bool:
+    """True when a row carries subtitle text: a subtitle file, or media paired with one."""
+    return item.get("kind") == "subtitle" or bool(item.get("companion"))
+
+
+def effective_language(item: dict[str, Any]) -> str:
+    """The language of a row's text: the one the user picked, else the one known from its name."""
+    return str(item.get("chosen_language") or item.get("language") or "")

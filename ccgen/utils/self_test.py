@@ -24,6 +24,8 @@ Check = tuple[str, Callable[[], None]]
 
 _QML_DIR = "ccgen/qml"
 _SERVER_TIMEOUT_S = 15.0
+# The names Qt's OpenSSL backend loads; Python's own ssl module uses libssl-3.dll instead.
+_QT_OPENSSL_DLLS = ("libssl-3-x64.dll", "libcrypto-3-x64.dll")
 
 # The QApplication must outlive every QML engine, so it is kept for the rest of the process.
 _qt_app: Optional[object] = None
@@ -181,6 +183,33 @@ def _check_qml() -> None:
             errors.extend(error.toString() for error in component.errors())
     if errors:
         raise RuntimeError("; ".join(errors))
+
+
+def _check_tls() -> None:
+    """Confirm a build leaves out Qt's OpenSSL backend and the OpenSSL DLLs it loads.
+
+    The first QtNetwork object loads that backend, which loads libssl-3-x64.dll from System32
+    before the bundle; on PCs where another program put a different OpenSSL there, the app
+    crashes with "entry point not found". See hooks/hook-PySide6.QtNetwork.py.
+    """
+    from PySide6.QtNetwork import QSslSocket
+
+    backends = QSslSocket.availableBackends()
+    if getattr(sys, "frozen", False):
+        folders = {os.path.dirname(sys.executable), getattr(sys, "_MEIPASS", "")} - {""}
+        found = [
+            os.path.join(folder, name)
+            for folder in sorted(folders)
+            for name in _QT_OPENSSL_DLLS
+            if os.path.isfile(os.path.join(folder, name))
+        ]
+        if found:
+            raise RuntimeError(f"the build bundles OpenSSL DLLs for Qt: {', '.join(found)}")
+        if "openssl" in backends:
+            raise RuntimeError("the build bundles Qt's OpenSSL TLS backend")
+    print(f"    Qt TLS backend: {QSslSocket.activeBackend()} (available: {', '.join(backends)})")
+
+
 CHECKS: list[Check] = [
     ("Engines", _check_engines),
     ("Lazily imported modules", _check_lazy_modules),
@@ -190,6 +219,7 @@ CHECKS: list[Check] = [
     ("Speech engines", _check_speech_engines),
     ("Embedded API server", _check_api_server),
     ("QML", _check_qml),
+    ("Qt TLS", _check_tls),
 ]
 
 

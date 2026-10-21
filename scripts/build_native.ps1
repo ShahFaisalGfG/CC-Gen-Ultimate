@@ -87,7 +87,9 @@ Write-Step "CMake configure"
 $Preset = "release-x64-msvc"
 Write-Host "   Preset : $Preset" -ForegroundColor DarkGray
 
-cmake --preset $Preset -S $NativeDir -B $BuildDir
+# --fresh drops the cached compiler path, which otherwise outlives a Visual Studio upgrade and
+# pairs the old compiler with the new toolset's headers (error STL1001).
+cmake --preset $Preset -S $NativeDir -B $BuildDir --fresh
 if ($LASTEXITCODE -ne 0) { Fail "CMake configure failed (exit $LASTEXITCODE)." }
 
 # --- CMake build -------------------------------------------------------------

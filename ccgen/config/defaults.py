@@ -225,7 +225,10 @@ class LanguageOptions:
 class TransliterationDefaults:
     """Transliteration scheme and engine defaults."""
 
-    DEFAULT_SOURCE = "roman"
+    ROMAN = "roman"
+    # Media and "auto" sources use the script of the text's language (capabilities.script_for_language).
+    SOURCE_AUTO = "auto"
+    DEFAULT_SOURCE = ROMAN
     DEFAULT_TARGET = "ur"
 
     ENGINE_RULE = "rule"

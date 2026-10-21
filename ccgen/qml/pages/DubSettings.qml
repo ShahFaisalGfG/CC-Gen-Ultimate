@@ -9,6 +9,9 @@ ColumnLayout {
     id: root
 
     property var options: ({})
+    // The Dub tab dubs into a chosen language, translating first when the speech or subtitle is
+    // in another; a workflow step speaks its input's text, in its language unless one is chosen.
+    property bool forTab: false
     signal optionChanged(string key, var value)
 
     readonly property string mode: root.options.mode || "auto"
@@ -43,7 +46,9 @@ ColumnLayout {
     Card {
         Layout.fillWidth: true
         title: "Voices"
-        description: "Speaks the subtitles and adds the speech to the video as a new audio track."
+        description: root.forTab
+            ? "Speaks each video in the chosen language and adds the speech as a new audio track."
+            : "Speaks the subtitles and adds the speech to the video as a new audio track."
         iconName: "speaker"
 
         FormRow {
@@ -74,15 +79,26 @@ ColumnLayout {
             model: prefsController.pendingLicence("dub", root.options, prefsController.settings)
         }
 
+        SpokenLanguageRow {
+            visible: root.forTab
+            value: root.options.spoken_language || ""
+            onChanged: value => root.optionChanged("spoken_language", value)
+        }
+
         FormRow {
-            label: "Speech language"
-            hint: root.options.language === "auto"
-                ? "Uses the subtitle's language, read from names like movie_es.srt." : ""
+            label: root.forTab ? "Dub into" : "Speech language"
+            hint: root.forTab
+                ? (root.options.language === "auto"
+                    ? "Speaks each file in its own language, for example to replace the voices."
+                    : "Speech or subtitles in another language are translated first.")
+                : (root.options.language === "auto" ? "Uses the language of the step's text, such as a subtitle's from names like movie_es.srt." : "")
             StyledComboBox {
                 Layout.fillWidth: true
-                accessibleName: "Speech language"
-                toolTipText: "Language the subtitles are written in and spoken in."
-                model: prefsController.dubLanguageOptions
+                accessibleName: root.forTab ? "Dub into" : "Speech language"
+                toolTipText: root.forTab ? "Language the dub speaks." : "Language the subtitles are written in and spoken in."
+                model: root.forTab
+                    ? prefsController.targetOptions.concat([{ label: "Keep the spoken language", code: "auto" }])
+                    : prefsController.dubLanguageOptions
                 value: root.options.language
                 onActivated: root.optionChanged("language", currentValue)
             }
@@ -91,7 +107,9 @@ ColumnLayout {
         FormRow {
             label: "Voice"
             visible: !root.cloning
-            hint: root.options.language === "auto" ? "Choose the speech language to pick a specific voice." : ""
+            hint: root.options.language === "auto"
+                ? (root.forTab ? "Choose the language to dub into to pick a specific voice." : "Choose the speech language to pick a specific voice.")
+                : ""
             StyledComboBox {
                 Layout.fillWidth: true
                 accessibleName: "Voice"

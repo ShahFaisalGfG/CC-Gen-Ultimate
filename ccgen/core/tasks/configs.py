@@ -205,7 +205,11 @@ class TranslateStep:
 
 @dataclass(kw_only=True)
 class TransliterateStep:
-    """Workflow step: convert the text of an earlier step to another script."""
+    """Workflow step: convert the text of an earlier step to another script.
+
+    `source_scheme` "auto" uses the script of the input's language (for example the language a
+    generate step detected), so its pair is only checked at run time.
+    """
 
     kind: Literal["transliterate"] = "transliterate"
     input: str = INPUT_SOURCE
@@ -215,7 +219,10 @@ class TransliterateStep:
     engine: str = TransliterationDefaults.DEFAULT_ENGINE
 
     def __post_init__(self) -> None:
-        validate_transliterate(self.engine, self.source_scheme, self.target_scheme)
+        if self.source_scheme == TransliterationDefaults.SOURCE_AUTO:
+            validate_transliteration_target(self.engine, self.target_scheme)
+        else:
+            validate_transliterate(self.engine, self.source_scheme, self.target_scheme)
 
 
 @dataclass(kw_only=True)
@@ -252,15 +259,28 @@ WorkflowStep = Annotated[
 class WorkflowConfig(SubtitleOutputConfig):
     """Run several steps on one file, each taking the workflow's file or an earlier step's text.
 
-    The subtitle formats and layout apply to every step that writes subtitles.
+    The subtitle formats and layout apply to every step that writes subtitles. `text_path` is a
+    subtitle whose text the steps reading the workflow's file use while `input_path` stays the
+    video or audio, for example to translate a video's subtitles and dub the result onto it.
+    `text_language` is the language of that text when its file name doesn't carry one ("" reads
+    the name).
     """
 
     task: Literal["workflow"] = "workflow"
     steps: list[WorkflowStep] = field(default_factory=list)
+    text_path: Optional[str] = None
+    text_language: str = ""
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        validate_workflow(self.input_path, self.steps)
+        if self.text_path and not is_subtitle(self.text_path):
+            raise ValueError("The text to use must be a subtitle file.")
+        validate_workflow(self.input_path, self.steps, self.text_path)
+
+    @property
+    def source_text_path(self) -> str:
+        """The subtitle file that steps reading the workflow's file take their text from."""
+        return self.text_path or self.input_path
 
 
 def step_input_index(value: str) -> Optional[int]:
@@ -272,11 +292,12 @@ def step_input_index(value: str) -> Optional[int]:
     raise ValueError(f"Unknown step input: {value}.")
 
 
-def validate_workflow(input_path: str, steps: list) -> None:
+def validate_workflow(input_path: str, steps: list, text_path: Optional[str] = None) -> None:
     """Check that every step's input exists, comes earlier, and carries text it can use."""
     if not steps:
         raise ValueError("Add at least one step to the workflow.")
     source_is_subtitle = is_subtitle(input_path)
+    source_has_text = source_is_subtitle or bool(text_path)
     writers: dict[str, int] = {}
     for number, step in enumerate(steps, 1):
         suffix = _written_suffix(step)
@@ -294,7 +315,7 @@ def validate_workflow(input_path: str, steps: list) -> None:
             continue
         index = step_input_index(step.input)
         if index is None:
-            if not source_is_subtitle:
+            if not source_has_text:
                 raise ValueError(f"{name} needs text: use a subtitle file or an earlier step as its input.")
         elif index >= number - 1:
             raise ValueError(f"{name} can only use a step that comes before it.")
@@ -398,13 +419,20 @@ def validate_translate(
 
 def validate_transliterate(engine: str, source_scheme: str, target_scheme: str, profile: str = "") -> None:
     """Reject identical scripts and script pairs the chosen engine cannot convert."""
-    if engine not in (AUTO, TransliterationDefaults.ENGINE_RULE, TransliterationDefaults.ENGINE_NEURAL):
-        raise ValueError(f"Unknown transliteration engine: {engine}.")
+    validate_transliteration_target(engine, target_scheme)
     if source_scheme == target_scheme:
         raise ValueError("Choose two different transliteration scripts.")
     engine = profiles.transliteration_engine(engine, profile, source_scheme, target_scheme)
     if not transliteration_supported(engine, source_scheme, target_scheme):
         raise ValueError(f"The {engine} engine can't convert {source_scheme} to {target_scheme}.")
+
+
+def validate_transliteration_target(engine: str, target_scheme: str) -> None:
+    """Reject an unknown transliteration engine or target script."""
+    if engine not in (AUTO, TransliterationDefaults.ENGINE_RULE, TransliterationDefaults.ENGINE_NEURAL):
+        raise ValueError(f"Unknown transliteration engine: {engine}.")
+    if target_scheme not in {code for _, code in TransliterationDefaults.SCHEMES}:
+        raise ValueError(f"Unknown transliteration script: {target_scheme}.")
 
 
 def require_subtitle_input(path: str, action: str) -> None:

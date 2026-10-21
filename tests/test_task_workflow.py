@@ -146,3 +146,76 @@ class TestRun:
         sub.write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
         result = WorkflowTask(_workflow(sub, {"kind": "translate", "target_lang": "es"})).run()
         assert not result.success and "Choose its source language" in result.error
+
+    def test_text_language_names_a_subtitle_without_one(self, tmp_path, engines):
+        sub = tmp_path / "talk.srt"
+        sub.write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+        result = WorkflowTask(_workflow(sub, {"kind": "translate", "target_lang": "es"}, text_language="en")).run()
+        assert result.success, result.error
+        assert engines["translation"].call_args.kwargs["source_lang"] == "en"
+
+    def test_detected_language_already_the_target_passes_through(self, tmp_path, engines):
+        media = tmp_path / "movie.mp4"
+        media.write_bytes(b"")
+        cfg = _workflow(
+            media, {"kind": "generate", "write_output": False},
+            {"kind": "translate", "input": "step:0", "target_lang": "en"},
+        )
+        result = WorkflowTask(cfg).run()
+        assert result.success, result.error
+        engines["translation"].assert_not_called()
+        assert result.output_files == [str(tmp_path / "movie_en.srt")]
+        assert any("already in English" in w for w in result.warnings)
+
+    def test_text_path_is_translated_and_dubbed_onto_the_media(self, tmp_path, engines):
+        _write_media(tmp_path / "movie.mp4")
+        sub = tmp_path / "movie_en.srt"
+        sub.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+        cfg = _workflow(
+            tmp_path / "movie.mp4",
+            {"kind": "translate", "target_lang": "es", "write_output": False},
+            {"kind": "dub", "input": "step:0", "mode": "kokoro"},
+            text_path=str(sub),
+        )
+        result = WorkflowTask(cfg).run()
+        assert result.success, result.error
+        engines["captions"].return_value.transcribe.assert_not_called()
+        assert engines["translation"].call_args.kwargs["source_lang"] == "en"
+        assert result.output_files == [str(tmp_path / "movie_dub_es.mkv")]
+
+    def test_automatic_script_comes_from_the_detected_language(self, tmp_path, engines):
+        media = tmp_path / "movie.mp4"
+        media.write_bytes(b"")
+        cfg = _workflow(
+            media, {"kind": "generate", "write_output": False},
+            {"kind": "transliterate", "input": "step:0", "source_scheme": "auto", "target_scheme": "hi",
+             "engine": "rule"},
+        )
+        result = WorkflowTask(cfg).run()
+        assert result.success, result.error
+        assert result.output_files == [str(tmp_path / "movie_tr_roman_hi.srt")]
+
+    def test_automatic_script_fails_clearly_without_one(self, tmp_path, engines):
+        engines["captions"].return_value.transcribe.return_value = [{**_SEGMENTS[0], "language": "ja"}]
+        media = tmp_path / "movie.mp4"
+        media.write_bytes(b"")
+        cfg = _workflow(
+            media, {"kind": "generate", "write_output": False},
+            {"kind": "transliterate", "input": "step:0", "source_scheme": "auto", "target_scheme": "roman"},
+        )
+        result = WorkflowTask(cfg).run()
+        assert not result.success and "doesn't support Japanese's script" in result.error
+
+
+class TestTextPathValidation:
+    def test_text_path_gives_steps_reading_the_source_their_text(self, tmp_path):
+        cfg = _workflow(tmp_path / "a.mp4", {"kind": "translate", "target_lang": "es"}, text_path=str(tmp_path / "a.srt"))
+        assert cfg.source_text_path == str(tmp_path / "a.srt")
+
+    def test_text_path_must_be_a_subtitle(self, tmp_path):
+        with pytest.raises(ValueError, match="must be a subtitle file"):
+            _workflow(tmp_path / "a.mp4", {"kind": "translate", "target_lang": "es"}, text_path=str(tmp_path / "b.mp4"))
+
+    def test_automatic_script_checks_only_the_target(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown transliteration script"):
+            _workflow(tmp_path / "a.srt", {"kind": "transliterate", "source_scheme": "auto", "target_scheme": "xx"})

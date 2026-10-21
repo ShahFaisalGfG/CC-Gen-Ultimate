@@ -92,12 +92,13 @@ Most auto-captioning tools are cloud services in disguise: upload your file, wai
 
 ## Features
 
-- **One tab per job** - Generate, Translate, Transliterate, and Dub each have their own queue, settings, and Start button, so one job never quietly depends on another
+- **One tab per job** - Generate, Translate, Transliterate, and Dub each have their own queue, settings, and Start button, and each works from a video or audio file alone: Translate, Transliterate, and Dub transcribe it first, so no tab needs another tab's output
 - **Generate** - drag in video/audio files, get word-timestamped subtitles via `faster-whisper`; runs on an NVIDIA GPU automatically when CUDA is available, otherwise on the CPU
 - **Readable subtitle layout** - speech is split into cues of up to two balanced 42-character lines, breaking at sentence ends, commas, and pauses, with a comfortable minimum display time and no overlapping cues (line length and line count are configurable)
-- **Translate** - translate subtitle files into any of 13 supported languages, fully offline, models auto-downloaded once; whole sentences are translated and mapped back onto the subtitle timing, and pairs without a direct model are bridged through English. The source language comes from names like `movie_en.srt`, from the tab a file was sent from, or your choice. See [Translation Models](#translation-models)
-- **Transliterate** - convert subtitle files between 14 scripts, including a purpose-built Urdu ⇄ Roman Urdu converter, with a lightweight rule-based engine or a higher-quality neural engine
-- **Dub** - speak a subtitle file and add the speech to its video as a new, language-tagged audio track (`movie_dub_es.mkv`), keeping the original audio, subtitles, and chapters; or save it as a separate WAV file. Every cloned line is heard back and spoken again if it came out garbled. See [Dubbing Voices](#dubbing-voices)
+- **Translate** - translate videos, audio, or subtitle files into any of 13 supported languages, fully offline, models auto-downloaded once; whole sentences are translated and mapped back onto the subtitle timing, and pairs without a direct model are bridged through English. Videos are transcribed first in the **Spoken language** (or one detected from the speech). See [Translation Models](#translation-models)
+- **Subtitle language** - every subtitle in a queue shows its language. It is read from the file name (`movie_en.srt`, `movie.en.srt`, `movie-en.srt`, `movie (English).srt`, `movie.eng.srt`, `movie.pt-BR.srt`, `movie.en.forced.srt`) or from the tab a file was sent from, and shows as **Auto (English)**; pick another language if it's wrong. A name without a language needs one chosen before the run. Select several files to set them all at once, from the row or from the right-click **Language** menu
+- **Transliterate** - convert videos, audio, or subtitle files between 14 scripts, including a purpose-built Urdu ⇄ Roman Urdu converter, with a lightweight rule-based engine or a higher-quality neural engine. Videos convert from the script of the language spoken; **Automatic (from the language)** does the same for subtitles
+- **Dub** - add a video, choose its **Spoken language** (or Auto-detect) and the language to **Dub into**, and the app transcribes, translates when the languages differ, and speaks it. The speech is added as a new, language-tagged audio track (`movie_dub_es.mkv`), keeping the original audio, subtitles, and chapters; or saved as a separate WAV file. A subtitle added with its video (`movie.mp4` + `movie_es.srt`) is spoken instead of a transcript, and translated first if needed; right-click the video and choose **Transcribe instead** to drop it. Every cloned line is heard back and spoken again if it came out garbled. See [Dubbing Voices](#dubbing-voices)
 - **Performance profiles** - Maximum quality, Balanced, or Light, chosen for your PC on first start and changeable in Preferences, or Custom to choose every model yourself; every model picker's **Automatic** choice follows it, and picking a model yourself overrides it for that feature. See [Performance Profiles](#performance-profiles)
 - **Workflow** - build a chain of steps (for example Generate, then Translate to Spanish, then Dub), add, remove, and reorder steps, and choose which earlier step each one reads; every queued file runs through every step
 - **Send to another tab** - right-click a finished file to hand its results to Translate, Transliterate, or Dub, together with their language
@@ -149,7 +150,7 @@ Models (`faster-whisper`, translation models, transliteration models, and dubbin
 
 1. **Generate** - on the **Generate** tab, drag & drop videos or folders (or use **Add files** / **Add folder**), check the model and language, and click **Start** (or press **Ctrl+Enter**). Subtitles stream into **Results**
 2. **Translate** - right-click a finished file and choose **Send the result to > Translate tab**, pick the target language, and click **Start**
-3. **Dub** - send the translation to the **Dub** tab; it pairs with its video automatically. Pick the voices (voice cloning is the default) and click **Start**
+3. **Dub** - add the video to the **Dub** tab (or send the translation there; it pairs with its video automatically), choose the language to dub into and the voices (voice cloning is the default), and click **Start**
 4. **Or do it all at once** - on the **Workflow** tab, keep the starter steps (Generate, then Translate), add a **Dub** step, queue your videos, and click **Start**
 
 Output files are written next to the input (or to the folder chosen under **Output > Save to**), named by what they contain: `video.srt` (original), `video_ur.srt` (translated to Urdu), `video_tr_ur_roman.srt` (transliterated Urdu → Roman), `video_dub_ur.mkv` (dubbed in Urdu). When the run ends, **Open output folder** takes you straight to them.
@@ -176,13 +177,13 @@ Output files are written next to the input (or to the folder chosen under **Outp
 
 ## How It Works
 
-Every tab runs one task; the Workflow tab runs several in the order you set, passing text from step to step in memory:
+Every tab runs one task, transcribing a video or audio file first when its task needs text; the Workflow tab runs several in the order you set, passing text from step to step in memory:
 
 ```
 Generate       video/audio ─► decode (PyAV) ─► transcribe (faster-whisper) ─► readable cues ─► video.srt
-Translate      subtitles ─► translate whole sentences (best model for the pair + meaning check) ─► video_<lang>.srt
-Transliterate  subtitles ─► convert script (rule or neural engine) ─► video_tr_<source>_<target>.srt
-Dub            subtitles + video ─► find speakers ─► speak each sentence at its time, hear it back ─► video_dub_<lang>.mkv
+Translate      subtitles or transcript ─► translate whole sentences (best model for the pair + meaning check) ─► video_<lang>.srt
+Transliterate  subtitles or transcript ─► convert script (rule or neural engine) ─► video_tr_<source>_<target>.srt
+Dub            video (transcribed, translated) or subtitles ─► find speakers ─► speak each sentence at its time, hear it back ─► video_dub_<lang>.mkv
 ```
 
 ### Performance Profiles
@@ -291,7 +292,7 @@ CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app pro
 | **Performance** | This PC's hardware (with **Detect again**), the performance profile, what each feature uses on it (or, on Custom, a picker for each model and the voice cloning quality), and **Use Automatic for every model** |
 | **Appearance** | Theme: System / Light / Dark |
 | **Transcription** | Default model and spoken language, compute device (Automatic / CPU / NVIDIA GPU), skip silence and music (voice activity filter) |
-| **Translation** | Translation model, default source language (or detect from each file), and target language |
+| **Translation** | Translation model, default source language for new Workflow translate steps (or detect from each file), and target language (also the Dub tab's starting language) |
 | **Transliteration** | Default source/target script and engine (rule/neural) |
 | **Dubbing** | Default voices, speakers, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
 | **Subtitles** | Default formats, characters per line, lines per subtitle, default save folder |
@@ -375,8 +376,8 @@ Every icon size and `CCGenUltimate.ico` are drawn by `scripts/make_icons.py`; af
 | Dubbing with voice cloning is slow | XTTS-v2 needs a GPU to be quick; on a CPU expect several times the video's length. Kokoro and Piper voices are much faster |
 | Dub tab says to accept the XTTS-v2 licence | Click **Review licence** under **Voices** and accept it, or choose Kokoro or Piper voices |
 | "line(s) were too long for their time" | Those lines ran more than a second past their time even at the fastest speech, so they were cut short. Raise **Fastest speech**, or shorten the subtitle text |
-| "No subtitle found" on the Dub tab | Add the subtitle with its video (`movie.mp4` + `movie_es.srt` pair up), or right-click the video and choose **Choose subtitle to speak...** |
-| "has no language in its name" | Pick the subtitle's language in the tab's settings instead of the automatic choice, or rename the file with a language suffix such as `movie_en.srt` |
+| "Choose the language of ... in the queue" | The subtitle's name doesn't say its language. Pick it in the file's **Language** box in the queue (select several files to set them together), or rename the file with a language tag such as `movie_en.srt` |
+| "Entry Point Not Found" for `libssl-3-x64.dll` at startup | Another program put its own OpenSSL in `C:\Windows\System32`, and older builds loaded it. Reinstall with the current installer: it uses Windows' own TLS and never loads OpenSSL for its interface |
 | "Nothing was written in ..., so the text is unchanged" | The subtitles are in a different script from the one chosen under **Scripts**; pick the script they are written in |
 | Dubbing doesn't use the GPU | The self-test (`CC-Gen-Ultimate.exe --self-test report.txt`) lists the devices found. Use the Intel GPU edition for Intel Arc or Core Ultra graphics |
 

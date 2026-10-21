@@ -219,6 +219,11 @@ class PrefsController(QObject):
         return _items(TransliterationDefaults.SCHEMES)
 
     @Property(list, constant=True)
+    def translitSourceOptions(self) -> list:
+        """Scripts a tab or workflow step converts from; "auto" uses the script of the text's language."""
+        return _items([("Automatic (from the language)", TransliterationDefaults.SOURCE_AUTO)] + TransliterationDefaults.SCHEMES)
+
+    @Property(list, constant=True)
     def translitEngineOptions(self) -> list:
         """Transliteration engines."""
         return _items(TransliterationDefaults.ENGINES)
