@@ -62,6 +62,7 @@ ComboBox {
            ? control.toolTipText + "\n" + control.currentText + ": " + control._badge(control.currentValue).toLowerCase() + "."
            : control.toolTipText)
     ToolTip.delay: 600
+    ToolTip.timeout: control.hovered ? -1 : Theme.focusTipTimeout
 
     contentItem: Text {
         leftPadding: 10
@@ -79,7 +80,7 @@ ComboBox {
         x: control.width - width - 10
         y: (control.height - height) / 2
         name: "chevronDown"
-        size: 10
+        size: Theme.iconXs
         color: Theme.textMuted
     }
 
@@ -96,12 +97,13 @@ ComboBox {
 
     background: Rectangle {
         radius: Theme.radius
-        // Disabled boxes take the muted fill, so the whole box reads as disabled, not just its text.
+        // Disabled boxes take the muted fill, so the whole box reads as disabled, text and all.
         color: !control.enabled ? Theme.surfaceAlt : control.hovered ? Theme.surfaceHover : Theme.surface
         border.width: control.visualFocus || control._warn || flashFill.opacity > 0 ? 2 : 1
         border.color: control.visualFocus ? Theme.focusRing
             : control._warn ? Theme.warning
-            : flashFill.opacity > 0 ? Theme.accent : Theme.border
+            : flashFill.opacity > 0 ? Theme.accent
+            : control.enabled ? Theme.inputBorder : Theme.border
 
         Rectangle {
             id: flashFill
@@ -136,7 +138,7 @@ ComboBox {
             Icon {
                 visible: row.badge.length > 0
                 name: control.readiness[row.modelData[control.valueRole]] ? "completed" : "download"
-                size: 12
+                size: Theme.iconSm
                 color: control.readiness[row.modelData[control.valueRole]] ? Theme.success : Theme.textMuted
             }
         }
