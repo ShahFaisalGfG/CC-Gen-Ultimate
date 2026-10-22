@@ -16,7 +16,7 @@
   #define MyAppPublisher "gfgRoyal"
 #endif
 #ifndef MyAppURL
-  #define MyAppURL "https://shahfaisalgfg.github.io/shahfaisal/"
+  #define MyAppURL "https://shahfaisalgfg.github.io/"
 #endif
 #ifndef MyGpuSuffix
   ; Set by the build scripts for GPU-specific builds (e.g. "_intel_gpu"); empty for the main build.

@@ -421,7 +421,7 @@ The source code is released under the [MIT License](LICENSE) - free to use, modi
 
 Built with faster-whisper, CTranslate2, OPUS-MT (University of Helsinki), Hy-MT2 (Tencent) on llama.cpp, NLLB-200, MADLAD-400, sentence-transformers' multilingual MiniLM, argostranslate, indic-transliteration, the transformers/PyTorch ecosystem, OmniVoice (k2-fsa), Coqui XTTS-v2, Kokoro, and Piper. OmniVoice's audio codec is built with Higgs Materials licensed from Boson AI USA, Inc. and Meta Llama 3 (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
-Built with ❤️ by **Shah Faisal** · [Portfolio](https://shahfaisalgfg.github.io/shahfaisal/) · [shahfaisalgfg@outlook.com](mailto:shahfaisalgfg@outlook.com)
+Built with ❤️ by **Shah Faisal** · [Portfolio](https://shahfaisalgfg.github.io/) · [shahfaisalgfg@gmail.com](mailto:shahfaisalgfg@gmail.com)
 
 ---
 
