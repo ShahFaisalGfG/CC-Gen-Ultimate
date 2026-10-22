@@ -54,6 +54,6 @@ include = ["ccgen*"]
 [tool.ccgen]
 display_name = "CC-Gen-Ultimate"
 publisher    = "gfgRoyal"
-url          = "https://shahfaisalgfg.github.io/shahfaisal/"
+url          = "https://shahfaisalgfg.github.io/"
 exe_name     = "CC-Gen-Ultimate.exe"
 winget_id    = "gfgRoyal.CCGenUltimate"
