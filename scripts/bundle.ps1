@@ -3,6 +3,9 @@
 # Dot-source it from the project root: . "$PSScriptRoot\bundle.ps1"
 
 $SelfTestTimeoutSec = 300
+# GitHub refuses release files of 2 GiB or more, so a larger installer is split into parts and a
+# larger portable archive into volumes, each at most this size.
+$ReleaseFileLimit = 2000000000
 
 # One installer can carry only one PyTorch build, and each GPU family needs its own, so every
 # build targets one:
@@ -109,6 +112,105 @@ function Get-PyInstallerArgs {
         "--clean",
         "$root\app.py"
     )
+}
+
+function Write-BuildInfo {
+    <#
+    .SYNOPSIS
+        Writes build.ini (GPU edition and runtime fingerprint) next to the bundle's exe.
+    .DESCRIPTION
+        Run after ccgen_shell.dll is copied in, since the DLL is part of the runtime. The in-app
+        updater reads build.ini to pick its edition's files and, when the runtime matches, the
+        small patch installer. See scripts\runtime_id.py.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$BundleDir,
+        [Parameter(Mandatory)] [ValidateSet("cuda", "xpu", "legacy")] [string]$Gpu,
+        [string]$ExeName = "CC-Gen-Ultimate.exe"
+    )
+    python "$PSScriptRoot\runtime_id.py" $BundleDir --edition $Gpu --exe $ExeName
+    if ($LASTEXITCODE -ne 0) { throw "runtime_id.py failed (exit $LASTEXITCODE)" }
+}
+
+function Invoke-InstallerBuild {
+    <#
+    .SYNOPSIS
+        Compiles an installer script and returns its files: the exe, then any -N.bin parts in order.
+    .DESCRIPTION
+        An installer at or above $ReleaseFileLimit is compiled again with Inno Setup's disk
+        spanning (SplitInstaller), which leaves a small exe and data parts under the limit; the
+        parts must sit next to the exe when it runs. The app metadata comes from pyproject.toml.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$Iscc,
+        [Parameter(Mandatory)] [string]$IssFile,
+        [Parameter(Mandatory)] [psobject]$Meta,
+        [string]$Suffix = "",
+        [string]$OutputDir = "build\installer"
+    )
+    $OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
+    $defines = @(
+        "/DMyAppName=$($Meta.AppName)",
+        "/DMyAppVersion=$($Meta.Version)",
+        "/DMyAppPublisher=$($Meta.Publisher)",
+        "/DMyAppURL=$($Meta.Url)",
+        "/DMyGpuSuffix=$Suffix",
+        "/O$OutputDir"
+    )
+    $script = [IO.Path]::GetFileNameWithoutExtension($IssFile) -replace '^ccgenultimate_', ''
+    $base = Join-Path $OutputDir "$($Meta.AppName)_$($Meta.Version)${Suffix}_$script"
+    Get-ChildItem "$base-*.bin" -ErrorAction SilentlyContinue | Remove-Item -Force
+    Write-Host "   Compiling : $IssFile" -ForegroundColor DarkGray
+    & $Iscc @defines $IssFile | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for '$IssFile' (exit $LASTEXITCODE)" }
+    if ((Get-Item "$base.exe").Length -ge $ReleaseFileLimit) {
+        Write-Host "   Over the release file limit; compiling again in parts" -ForegroundColor DarkGray
+        & $Iscc @defines "/DSplitInstaller=1" $IssFile | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for '$IssFile' in parts (exit $LASTEXITCODE)" }
+    }
+    $parts = Get-ChildItem "$base-*.bin" -ErrorAction SilentlyContinue |
+        Sort-Object { [int]($_.BaseName -replace '^.*-(\d+)$', '$1') } | ForEach-Object { $_.FullName }
+    return @((Resolve-Path "$base.exe").Path) + @($parts)
+}
+
+function Split-ReleaseFile {
+    <#
+    .SYNOPSIS
+        Splits a file at or above $ReleaseFileLimit into <name>.001, .002, ... and returns the files.
+    .DESCRIPTION
+        A .7z split this way is a multi-volume archive: 7-Zip opens <name>.7z.001 with the rest
+        beside it. A smaller file is returned as it is.
+    #>
+    param([Parameter(Mandatory)] [string]$Path)
+    $file = Get-Item $Path
+    if ($file.Length -lt $ReleaseFileLimit) { return @($file.FullName) }
+    $volumes = @()
+    $buffer = New-Object byte[] (16MB)
+    $source = [IO.File]::OpenRead($file.FullName)
+    try {
+        $index = 0
+        while ($source.Position -lt $source.Length) {
+            $index++
+            $volume = "{0}.{1:D3}" -f $file.FullName, $index
+            $target = [IO.File]::Create($volume)
+            try {
+                $written = 0L
+                while ($written -lt $ReleaseFileLimit) {
+                    $read = $source.Read($buffer, 0, [math]::Min($buffer.Length, $ReleaseFileLimit - $written))
+                    if ($read -le 0) { break }
+                    $target.Write($buffer, 0, $read)
+                    $written += $read
+                }
+            } finally {
+                $target.Dispose()
+            }
+            $volumes += $volume
+        }
+    } finally {
+        $source.Dispose()
+    }
+    Remove-Item $file.FullName -Force
+    return $volumes
 }
 
 function Test-Bundle {

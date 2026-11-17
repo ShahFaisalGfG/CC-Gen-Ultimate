@@ -5,7 +5,8 @@
     Step 1 - Native build : compiles ccgen_shell.dll (context menu)
     Step 2 - PyInstaller  : bundles the app into dist\CC-Gen-Ultimate\
     Step 3 - Shell DLL    : copies ccgen_shell.dll into dist\CC-Gen-Ultimate\
-    Step 4 - Inno Setup   : compiles system and user installers into build\installer\
+    Step 4 - Inno Setup   : writes build.ini, then compiles the system, user, and patch installers
+                            into build\installer\ (split into parts when over 2 GiB)
     Step 5 - Portable     : builds a single-file portable exe into build\
 .PARAMETER Gpu
     Which GPU the build's PyTorch targets: "cuda" (NVIDIA GTX 10 series to RTX 50, the default
@@ -32,7 +33,8 @@ $ErrorActionPreference = "Stop"
 
 $IssFiles = @(
     "installer\ccgenultimate_system_installer.iss",
-    "installer\ccgenultimate_user_installer.iss"
+    "installer\ccgenultimate_user_installer.iss",
+    "installer\ccgenultimate_patch_installer.iss"
 )
 $IsccPaths = @(
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
@@ -50,21 +52,6 @@ function Fail([string]$Msg) {
     Write-Host ""
     Write-Host "ERROR: $Msg" -ForegroundColor Red
     exit 1
-}
-
-function Invoke-Iscc([string]$IssPath) {
-    # Compiles an ISS file, injecting all app metadata as ISCC /D definitions.
-    Write-Host "   Compiling : $IssPath" -ForegroundColor DarkGray
-    & $Iscc `
-        "/DMyAppName=$($Meta.AppName)" `
-        "/DMyAppVersion=$($Meta.Version)" `
-        "/DMyAppPublisher=$($Meta.Publisher)" `
-        "/DMyAppURL=$($Meta.Url)" `
-        "/DMyGpuSuffix=$Suffix" `
-        $IssPath
-    if ($LASTEXITCODE -ne 0) {
-        Fail "Inno Setup failed for '$IssPath' (exit $LASTEXITCODE)."
-    }
 }
 
 function Format-Elapsed([TimeSpan]$ts) {
@@ -208,15 +195,21 @@ if (-not (Test-Path $ShellDll)) {
 Copy-Item $ShellDll (Join-Path $ProjectRoot "dist\$AppName\ccgen_shell.dll") -Force
 Write-Host "   Copied ccgen_shell.dll to dist\$AppName\" -ForegroundColor DarkGray
 
+# ── Edition and runtime ───────────────────────────────────────────────────────
+
+Write-Step "Recording the edition and runtime (build.ini)"
+
+Write-BuildInfo -BundleDir $DistDir -Gpu $Gpu -ExeName $Meta.ExeName
+
 # ── Inno Setup ────────────────────────────────────────────────────────────────
 
 Write-Step "Compiling installers with Inno Setup"
 
-$IsccElapsed = @()
+$Outputs = @()
 foreach ($iss in $IssFiles) {
     $t = Get-Date
-    Invoke-Iscc $iss
-    $IsccElapsed += (Get-Date) - $t
+    $files = Invoke-InstallerBuild -Iscc $Iscc -IssFile $iss -Meta $Meta -Suffix $Suffix
+    $Outputs += [pscustomobject]@{ Files = $files; Elapsed = (Get-Date) - $t }
 }
 
 # ── Portable Exe ──────────────────────────────────────────────────────────────
@@ -251,22 +244,13 @@ $PortableElapsed = (Get-Date) - $PortableStart
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
-$Outputs = @(
-    "build\installer\${AppName}_${Version}${Suffix}_system_installer.exe",
-    "build\installer\${AppName}_${Version}${Suffix}_user_installer.exe"
-)
-
 Write-Host ""
 Write-Host "Build complete in $(Format-Elapsed ((Get-Date) - $BuildStart))." -ForegroundColor Green
 
-for ($i = 0; $i -lt $Outputs.Count; $i++) {
-    $out = $Outputs[$i]
-    if (Test-Path $out) {
-        $Mb = [math]::Round((Get-Item $out).Length / 1MB, 1)
-        $elapsed = if ($i -lt $IsccElapsed.Count) { "  ($(Format-Elapsed $IsccElapsed[$i]))" } else { "" }
-        Write-Host "Installer    : $out  ($Mb MB)$elapsed" -ForegroundColor Green
-    } else {
-        Write-Host "Missing      : $out" -ForegroundColor Yellow
+foreach ($output in $Outputs) {
+    foreach ($file in $output.Files) {
+        $Mb = [math]::Round((Get-Item $file).Length / 1MB, 1)
+        Write-Host "Installer    : $file  ($Mb MB)  ($(Format-Elapsed $output.Elapsed))" -ForegroundColor Green
     }
 }
 

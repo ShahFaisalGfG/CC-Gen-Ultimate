@@ -1,6 +1,10 @@
 # test_defaults.py - sanity checks for ccgen.config.defaults
 
+import os
+import tomllib
+
 from ccgen.config.defaults import (
+    AppInfo,
     LanguageOptions,
     ModelDefaults,
     TranslationDefaults,
@@ -9,7 +13,21 @@ from ccgen.config.defaults import (
 )
 
 
+def test_app_version_matches_pyproject():
+    """The About dialog and the updater use AppInfo's version; releases are named from pyproject.
+
+    A mismatch would make the updater offer the installed release as an update forever.
+    """
+    pyproject = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pyproject.toml")
+    with open(pyproject, "rb") as fh:
+        assert AppInfo.APP_VERSION == tomllib.load(fh)["project"]["version"]
+
+
 class TestGetDefaultSettings:
+    def test_updates_are_checked_and_installed_by_default(self):
+        """Both update switches start on; Preferences > Updates can turn either off."""
+        assert get_default_settings()["updates"] == {"auto_check": True, "auto_install": True}
+
     def test_returns_dict_with_expected_top_level_sections(self):
         settings = get_default_settings()
         expected = {

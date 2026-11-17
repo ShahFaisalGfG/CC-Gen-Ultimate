@@ -76,7 +76,6 @@ $Meta      = Get-AppMeta
 $AppName   = $Meta.AppName
 $Version   = $Meta.Version
 $DistDir   = "dist\$AppName"
-$OutputExe = "build\installer\${AppName}_${Version}$($GpuSuffix[$Gpu])_user_installer.exe"
 
 # ── Native C++ target ─────────────────────────────────────────────────────────
 
@@ -188,29 +187,23 @@ if (-not (Test-Path $ShellDll)) {
 Copy-Item $ShellDll (Join-Path $ProjectRoot "dist\$AppName\ccgen_shell.dll") -Force
 Write-Host "   Copied ccgen_shell.dll to dist\$AppName\" -ForegroundColor DarkGray
 
+# ── Edition and runtime ───────────────────────────────────────────────────────
+
+Write-Step "Recording the edition and runtime (build.ini)"
+
+Write-BuildInfo -BundleDir $DistDir -Gpu $Gpu -ExeName $Meta.ExeName
+
 # ── Inno Setup ────────────────────────────────────────────────────────────────
 
 Write-Step "Compiling installer with Inno Setup"
 
-Write-Host "   Compiling : $IssFile" -ForegroundColor DarkGray
-& $Iscc `
-    "/DMyAppName=$($Meta.AppName)" `
-    "/DMyAppVersion=$($Meta.Version)" `
-    "/DMyAppPublisher=$($Meta.Publisher)" `
-    "/DMyAppURL=$($Meta.Url)" `
-    "/DMyGpuSuffix=$($GpuSuffix[$Gpu])" `
-    $IssFile
-if ($LASTEXITCODE -ne 0) {
-    Fail "Inno Setup failed for '$IssFile' (exit $LASTEXITCODE)."
-}
+$Files = Invoke-InstallerBuild -Iscc $Iscc -IssFile $IssFile -Meta $Meta -Suffix $GpuSuffix[$Gpu]
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
-if (-not (Test-Path $OutputExe)) {
-    Fail "Expected installer not found: $OutputExe"
-}
-
-$Mb = [math]::Round((Get-Item $OutputExe).Length / 1MB, 1)
 Write-Host ""
 Write-Host "Build complete in $(Format-Elapsed ((Get-Date) - $BuildStart))." -ForegroundColor Green
-Write-Host "Installer : $OutputExe  ($Mb MB)" -ForegroundColor Green
+foreach ($File in $Files) {
+    $Mb = [math]::Round((Get-Item $File).Length / 1MB, 1)
+    Write-Host "Installer : $File  ($Mb MB)" -ForegroundColor Green
+}

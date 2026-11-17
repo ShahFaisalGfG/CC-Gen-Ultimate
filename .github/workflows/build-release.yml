@@ -58,6 +58,16 @@ jobs:
           "EXE_NAME=$($m.ExeName)"              | Out-File $env:GITHUB_OUTPUT -Append
           "SUFFIX=$($GpuSuffix['${{ matrix.gpu }}'])" | Out-File $env:GITHUB_OUTPUT -Append
 
+      # A local staging build points the updater at a test server and a test key
+      # (ccgen/config/update_staging.py); that file must never reach a release.
+      - name: Check no staging update feed is present
+        shell: pwsh
+        run: |
+          if (Test-Path ccgen\config\update_staging.py) {
+            Write-Error "ccgen\config\update_staging.py is a local test file; delete it before releasing."
+            exit 1
+          }
+
       # PyInstaller is a dev-only dependency (pyproject's [dev] extra), so it is installed here.
       # Install-GpuRuntime then swaps in this build's PyTorch and the DirectML ONNX Runtime.
       - name: Install Python dependencies
@@ -113,53 +123,48 @@ jobs:
         shell: pwsh
         run: Copy-Item build\shell\ccgen_shell.dll dist\${{ steps.meta.outputs.APP_NAME }}\ -Force
 
+      # build.ini next to the exe names this GPU edition and fingerprints the bundled runtime
+      # (scripts/runtime_id.py, after the shell DLL joins it), so the in-app updater picks this
+      # edition's files and, when only the app changed, the small patch installer.
+      - name: Record the edition and runtime
+        shell: pwsh
+        run: |
+          . .\scripts\bundle.ps1
+          Write-BuildInfo -BundleDir "dist\${{ steps.meta.outputs.APP_NAME }}" -Gpu ${{ matrix.gpu }} -ExeName "${{ steps.meta.outputs.EXE_NAME }}"
+
       - name: Install Inno Setup 6
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
-      # /D flags override the #ifndef defaults in the ISS files
+      # The full installers (split into an exe and -N.bin parts when one would reach GitHub's
+      # 2 GiB file limit) and the patch installer, which replaces only the app layer of a copy
+      # with the same runtime. The app metadata comes from pyproject.toml.
       - name: Build installers
         shell: pwsh
         run: |
+          . .\scripts\bundle.ps1
+          . .\scripts\app_meta.ps1
+          $meta = Get-AppMeta
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          foreach ($iss in "installer\ccgenultimate_system_installer.iss", "installer\ccgenultimate_user_installer.iss") {
-            & $iscc `
-              "/DMyAppName=${{ steps.meta.outputs.APP_NAME }}" `
-              "/DMyAppVersion=${{ steps.meta.outputs.VER }}" `
-              "/DMyAppPublisher=${{ steps.meta.outputs.PUBLISHER }}" `
-              "/DMyAppURL=${{ steps.meta.outputs.URL }}" `
-              "/DMyGpuSuffix=${{ steps.meta.outputs.SUFFIX }}" `
-              $iss
-            if ($LASTEXITCODE -ne 0) { throw "Installer build failed for $iss (exit $LASTEXITCODE)" }
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          foreach ($kind in "system", "user", "patch") {
+            $files = Invoke-InstallerBuild -Iscc $iscc -IssFile "installer\ccgenultimate_${kind}_installer.iss" `
+              -Meta $meta -Suffix "${{ steps.meta.outputs.SUFFIX }}"
+            Copy-Item $files release\
           }
 
-      # Single-file portable exe, verified the same way as the onedir bundle
-      - name: Build portable exe
+      # The portable folder is the onedir bundle as a .7z, cut into volumes (<name>.7z.001, ...)
+      # when it reaches the 2 GiB limit; 7-Zip opens the .001 with the rest beside it. It can't
+      # replace itself, so the app links to new releases instead. No one-file exe is published:
+      # it would be over the limit and unpack gigabytes to %TEMP% at every start.
+      - name: Pack the portable folder
         shell: pwsh
         run: |
           . .\scripts\bundle.ps1
-          $portable = "${{ steps.meta.outputs.APP_NAME }}_${{ steps.meta.outputs.VER }}${{ steps.meta.outputs.SUFFIX }}_portable"
-          $pyArgs = Get-PyInstallerArgs -Name $portable -Mode onefile -DistPath "build"
-          pyinstaller @pyArgs
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller (portable) failed (exit $LASTEXITCODE)" }
-          if (-not (Test-Bundle "build\$portable.exe")) { throw "Portable self-test failed" }
-      # Pack all three EXEs into .7z archives for users who prefer compressed downloads.
-      - name: Create 7z archives
-        shell: pwsh
-        run: |
-          $base = "${{ steps.meta.outputs.APP_NAME }}_${{ steps.meta.outputs.VER }}${{ steps.meta.outputs.SUFFIX }}"
-          $7z   = "C:\Program Files\7-Zip\7z.exe"
-          New-Item -ItemType Directory -Path release -Force | Out-Null
-
-          foreach ($kind in "system", "user") {
-            & $7z a -t7z -mx=9 "release\${base}_${kind}_installer.7z" "build\installer\${base}_${kind}_installer.exe"
-            if ($LASTEXITCODE -ne 0) { throw "7z: $kind installer archive failed" }
-            Copy-Item "build\installer\${base}_${kind}_installer.exe" release\
-          }
-
-          & $7z a -t7z -mx=9 "release\${base}_portable.7z" "dist\${{ steps.meta.outputs.APP_NAME }}\*"
-          if ($LASTEXITCODE -ne 0) { throw "7z: portable bundle archive failed" }
-          Copy-Item "build\${base}_portable.exe" release\
+          $archive = "release\${{ steps.meta.outputs.APP_NAME }}_${{ steps.meta.outputs.VER }}${{ steps.meta.outputs.SUFFIX }}_portable.7z"
+          & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=9 $archive "dist\${{ steps.meta.outputs.APP_NAME }}\*"
+          if ($LASTEXITCODE -ne 0) { throw "7z: portable archive failed (exit $LASTEXITCODE)" }
+          $null = Split-ReleaseFile $archive
 
       - name: Upload release files
         uses: actions/upload-artifact@v4
@@ -168,7 +173,15 @@ jobs:
           path: release\*
           if-no-files-found: error
 
-  # Publishes one GitHub Release with both builds' files once every build has passed.
+      # The release job lists each edition's runtime fingerprint in the update manifest.
+      - name: Upload build info
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildinfo-${{ matrix.gpu }}
+          path: dist\${{ steps.meta.outputs.APP_NAME }}\build.ini
+          if-no-files-found: error
+
+  # Publishes one GitHub Release with every edition's files once every build has passed.
   release:
     needs: build
     runs-on: windows-latest
@@ -187,8 +200,54 @@ jobs:
       - name: Download release files
         uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: release
           merge-multiple: true
+
+      - name: Download build info
+        uses: actions/download-artifact@v4
+        with:
+          pattern: buildinfo-*
+          path: buildinfo
+
+      # GitHub refuses a release file of 2 GiB or more; stop before a release is half uploaded.
+      - name: Check every release file is under 2 GiB
+        shell: pwsh
+        run: |
+          $big = Get-ChildItem release -File | Where-Object Length -ge 2000000000
+          foreach ($file in $big) { Write-Error "$($file.Name) is $($file.Length) bytes, over GitHub's 2 GiB limit" }
+          if ($big) { exit 1 }
+
+      # update.json lists what the in-app updater installs for each edition: the system and user
+      # installers (with their parts) and the patch installer for that edition's runtime, with
+      # sizes and SHA-256 hashes. It is signed with UPDATE_SIGNING_KEY; --expect stops a release
+      # signed with a key CC-Gen-Ultimate doesn't carry, which no installed copy could verify.
+      - name: Write and sign the update manifest
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          python -m pip install "cryptography>=46"
+          if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit $LASTEXITCODE)" }
+          . .\scripts\bundle.ps1
+          $m = python scripts/read_meta.py | ConvertFrom-Json
+          $specs = @()
+          foreach ($gpu in "cuda", "legacy", "xpu") {
+            $runtime = (Select-String -Path "buildinfo\buildinfo-$gpu\build.ini" -Pattern '^runtime_id\s*=\s*([0-9a-f]{64})').Matches[0].Groups[1].Value
+            $base = "release\$($m.AppName)_$($m.Version)$($GpuSuffix[$gpu])"
+            foreach ($kind in "system", "user") {
+              $parts = Get-ChildItem "${base}_${kind}_installer-*.bin" -ErrorAction SilentlyContinue |
+                Sort-Object { [int]($_.BaseName -replace '^.*-(\d+)$', '$1') } | ForEach-Object { $_.FullName }
+              $files = @("${base}_${kind}_installer.exe") + @($parts)
+              $specs += "--package", "kind=$kind;edition=$gpu;files=$($files -join ',')"
+            }
+            $specs += "--package", "kind=patch;edition=$gpu;runtime_id=$runtime;files=${base}_patch_installer.exe"
+          }
+          python scripts/make_update_manifest.py --app $m.AppName --version $m.Version `
+            --repo $env:GITHUB_REPOSITORY --out release\update.json @specs
+          if ($LASTEXITCODE -ne 0) { throw "make_update_manifest.py failed (exit $LASTEXITCODE)" }
+          python scripts/sign_update.py release\update.json --expect ccgen\config\defaults.py
+          if ($LASTEXITCODE -ne 0) { throw "sign_update.py failed (exit $LASTEXITCODE)" }
 
       # Must use RELEASE_PAT (not GITHUB_TOKEN) - events fired by GITHUB_TOKEN
       # do not cascade into other workflows, so winget-release.yml would never trigger.
@@ -205,3 +264,4 @@ jobs:
             --title "$($m.AppName) v$($m.Version)" `
             --notes-file "release_notes/release_notes_v$($m.Version).md" `
             @files
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }

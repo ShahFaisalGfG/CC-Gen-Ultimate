@@ -235,6 +235,8 @@ Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\ccgen_shell.dll"""; F
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
+#include "shared.iss"
+
 [Code]
 function UserInstallExists(): Boolean;
 var S: String;
@@ -261,11 +263,11 @@ begin
   Result := True;
   if UserInstallExists() then
   begin
-    if MsgBox(
+    if SuppressibleMsgBox(
       'A per-user installation of CC-Gen-Ultimate was found.' + #13#10#13#10 +
       'Click Yes to remove it and continue with the system-wide installation.' + #13#10 +
       'Click No to cancel - then use the per-user installer to update instead.',
-      mbConfirmation, MB_YESNO) = IDNO then
+      mbConfirmation, MB_YESNO, IDNO) = IDNO then
     begin
       Result := False;
       Exit;
@@ -280,7 +282,7 @@ procedure InitializeWizard();
 begin
   WizardForm.WelcomeLabel2.Caption :=
     'This wizard will guide you through the installation of {#MyAppName}.'#13#13 +
-    'CC-Gen-Ultimate transcribes, translates, and transliterates video and audio files into subtitles - entirely offline.'#13#13 +
+    'CC-Gen-Ultimate transcribes, translates, and transliterates video and audio files into subtitles on this PC; your media never leaves it.'#13#13 +
     'It is recommended that you close all other applications before continuing.';
 end;
 
@@ -301,6 +303,7 @@ begin
     if FileExists(DllPath) then
       Exec(ExpandConstant('{sys}\regsvr32.exe'), '/s /u "' + DllPath + '"',
            '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    MoveShellDllAside();
     RemoveStaleUserRegistryEntries();
   end;
 end;

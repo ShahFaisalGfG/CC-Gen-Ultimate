@@ -23,12 +23,14 @@ class AssetsController(QObject):
     assetStatus     = Signal(str, str)
     assetFinished   = Signal(str, bool, str)
     removeFailed    = Signal(str, str)
+    busyChanged     = Signal(bool)
 
     def __init__(self, base_url: str, parent=None):
         super().__init__(parent)
         self._api = ApiClient(base_url, self)
         self._assets: list[dict[str, Any]] = []
         self._readiness: dict[str, bool] = {}
+        self._active: set[str] = set()  # downloads queued or running
         self._socket: Optional[QWebSocket] = self._api.open_stream("/assets/stream", self._on_stream_event)
         self.refreshAssets()
 
@@ -36,6 +38,11 @@ class AssetsController(QObject):
     def assets(self) -> list:
         """Current catalog snapshot: id/category/label/downloaded/size for every asset."""
         return self._assets
+
+    @Property(bool, notify=busyChanged)
+    def busy(self) -> bool:
+        """True while a download is queued or running; installing an update waits for it."""
+        return bool(self._active)
 
     @Property("QVariantMap", notify=assetsChanged)  # type: ignore[arg-type]
     def readiness(self) -> dict:
@@ -115,11 +122,23 @@ class AssetsController(QObject):
         kind = event.get("event")
         asset_id = str(event.get("id", ""))
         if kind == "queued":
+            self._set_active(asset_id, True)
             self.assetQueued.emit(asset_id)
         elif kind == "status":
             self.assetStatus.emit(asset_id, str(event.get("message", "")))
         elif kind == "progress":
             self.assetProgress.emit(asset_id, int(event["done"]), int(event["total"]))
         elif kind == "finished":
+            self._set_active(asset_id, False)
             self.assetFinished.emit(asset_id, bool(event.get("success")), str(event.get("error") or ""))
             self.refreshAssets()
+
+    def _set_active(self, asset_id: str, active: bool) -> None:
+        """Track the downloads in progress; busyChanged fires when the first starts and the last ends."""
+        was_busy = bool(self._active)
+        if active:
+            self._active.add(asset_id)
+        else:
+            self._active.discard(asset_id)
+        if bool(self._active) != was_busy:
+            self.busyChanged.emit(bool(self._active))

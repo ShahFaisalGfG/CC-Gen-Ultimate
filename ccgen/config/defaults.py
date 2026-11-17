@@ -12,6 +12,31 @@ class AppInfo:
     APP_DESCRIPTION = "Offline subtitle generation, translation, transliteration, and dubbing"
 
 
+class UpdateInfo:
+    """Where updates come from, and the keys that sign them (scripts/sign_update.py)."""
+
+    REPO_URL = "https://github.com/ShahFaisalGfG/CC-Gen-Ultimate"
+    # The public half of each release signing key, exactly as `openssl ec -pubout` prints it. The
+    # release workflow refuses to sign with a key that is not listed here. A release signed with
+    # the current key can add the next one, so the key can be replaced without breaking updates.
+    # The private half is kept in Doppler (project cc-gen-ultimate, config prd) and copied to the
+    # UPDATE_SIGNING_KEY Actions secret.
+    PUBLIC_KEYS: tuple[str, ...] = (
+        """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4Ref0MVuNXKUIripb/juQCmGQBxp
+k1/rvNKMB9DT9k8Dk845EOg2ZxmVISIr79ts5T/SS/IwKFP3DDIVLE9qdA==
+-----END PUBLIC KEY-----
+""",
+    )
+
+
+class UpdateDefaults:
+    """Default update preferences: check once a day, and install in the background."""
+
+    AUTO_CHECK = True
+    AUTO_INSTALL = True
+
+
 # A model choice that the performance profile resolves (see ccgen/config/profiles.py).
 AUTO = "auto"
 # Version of the settings file layout; ccgen/utils/settings.py migrates older files.
@@ -392,5 +417,9 @@ def get_default_settings() -> dict[str, Any]:
         },
         "ui": {
             "theme": "system",
+        },
+        "updates": {
+            "auto_check": UpdateDefaults.AUTO_CHECK,
+            "auto_install": UpdateDefaults.AUTO_INSTALL,
         },
     }
