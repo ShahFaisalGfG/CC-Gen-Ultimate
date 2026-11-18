@@ -9,6 +9,8 @@ Rectangle {
     id: bar
 
     required property var controller
+    // The app's UpdateController, whose notice shows below the status while no run is going.
+    property var updates: null
     readonly property var queue: bar.controller.fileModel
     readonly property bool busy: bar.controller.busy
 
@@ -83,6 +85,12 @@ Rectangle {
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textMuted
                 elide: Text.ElideMiddle
+            }
+
+            UpdateNotice {
+                Layout.fillWidth: true
+                controller: bar.updates
+                visible: !bar.busy && bar.updates !== null && bar.updates.bannerVisible
             }
         }
 

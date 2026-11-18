@@ -156,14 +156,6 @@ AppWindow {
         anchors.fill: parent
         spacing: 0
 
-        UpdateBanner {
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spaceLg
-            Layout.rightMargin: Theme.spaceLg
-            Layout.topMargin: Theme.spaceSm
-            controller: updateController
-        }
-
         TabBar {
             id: tabs
             objectName: "taskTabs"
