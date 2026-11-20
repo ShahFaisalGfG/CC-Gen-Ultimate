@@ -1,0 +1,34 @@
+// ccgen_shell.rc - version resource of the Explorer shell extension. CMake writes ccgen_version.h
+// from the version in pyproject.toml, so the DLL always matches the app.
+
+#include <winver.h>
+#include "ccgen_version.h"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    CCGEN_VERSION_BINARY
+ PRODUCTVERSION CCGEN_VERSION_BINARY
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "gfgRoyal"
+            VALUE "FileDescription",  "CC-Gen-Ultimate Explorer context menu"
+            VALUE "FileVersion",      CCGEN_VERSION_TEXT
+            VALUE "InternalName",     "ccgen_shell"
+            VALUE "LegalCopyright",   "Copyright (c) 2026 Shah Faisal"
+            VALUE "OriginalFilename", "ccgen_shell.dll"
+            VALUE "ProductName",      "CC-Gen-Ultimate"
+            VALUE "ProductVersion",   CCGEN_VERSION_TEXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

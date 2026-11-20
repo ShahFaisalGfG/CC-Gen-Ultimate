@@ -58,6 +58,28 @@ function Install-GpuRuntime {
     if ($LASTEXITCODE -ne 0) { throw "Installing onnxruntime-directml failed (exit $LASTEXITCODE)" }
 }
 
+function New-VersionFile {
+    <#
+    .SYNOPSIS
+        Writes an exe's version details for PyInstaller and returns the file's path.
+    .DESCRIPTION
+        Every exe the build makes carries the app's name as its product name and the version from
+        pyproject.toml (read_meta.py writes them), which code signing requires; the description
+        names the exe in Task Manager and in its Properties (the app's name unless given). It needs
+        nothing but this file, as the release workflow loads only bundle.ps1.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$Exe,
+        [string]$Description = ""
+    )
+    $root = Split-Path -Parent $PSScriptRoot
+    $path = "$root\build\pyinstaller\$Exe.version.txt"
+    $describe = if ($Description) { @("--description", $Description) } else { @() }
+    python (Join-Path $PSScriptRoot "read_meta.py") --version-file $path --exe $Exe @describe
+    if ($LASTEXITCODE -ne 0) { throw "Could not write the version details of $Exe.exe (exit $LASTEXITCODE)" }
+    return $path
+}
+
 function Get-PyInstallerArgs {
     <#
     .SYNOPSIS
@@ -74,6 +96,7 @@ function Get-PyInstallerArgs {
         "--windowed",
         "--$Mode",
         "--icon",      "$root\ccgen\assets\icons\CCGenUltimate.ico",
+        "--version-file", (New-VersionFile -Exe $Name),
         # hooks\hook-PySide6.QtQml.py leaves out Qt WebEngine (about 200 MB the app never uses);
         # hooks\hook-TTS.py ships coqui-tts with its source files, which TorchScript reads.
         "--additional-hooks-dir", "$root\hooks",

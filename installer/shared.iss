@@ -8,6 +8,13 @@
 #define AppMutexes "CCGenUltimateAppMutex,Global\CCGenUltimateAppMutex"
 
 [Setup]
+; The setup exe's version details: the app's name and version, as code signing requires.
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoCopyright=Copyright (c) 2026 Shah Faisal
 ; Setup asks the user to close CC-Gen-Ultimate (an update waits for it to exit) instead of
 ; replacing a running copy's files.
 AppMutex={#AppMutexes}
