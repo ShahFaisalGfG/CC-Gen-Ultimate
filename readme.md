@@ -33,6 +33,7 @@ CC-Gen-Ultimate is a **free, open-source** desktop app that turns any video or a
   - [Download \& Install](#download--install)
     - [Option 1 - Windows Package Manager (Coming Soon)](#option-1---windows-package-manager-coming-soon)
     - [Option 2 - Installers](#option-2---installers)
+    - [Updating](#updating)
   - [Quick Start](#quick-start)
   - [Screenshots](#screenshots)
   - [How It Works](#how-it-works)
@@ -76,7 +77,8 @@ If you've ever thought *"I just need subtitles for this file, without uploading 
 
 Most auto-captioning tools are cloud services in disguise: upload your file, wait in a queue, pay per minute, and hope nothing sensitive was in the audio. CC-Gen-Ultimate runs the entire pipeline - transcription, translation, and transliteration - on your own hardware.
 
-- 🔒 **100% offline** - no accounts, no cloud sync, no telemetry, models download once and never again
+- 🔒 **Works offline** - no accounts, no cloud sync, no telemetry; models download once, and the only other connection is an update check you can turn off
+- 🔄 **Updates itself** - checks once a day and installs a new version when you close it, only after its publisher signature checks out; when only the app changed, the update is a small patch instead of the whole installer
 - 🎙️ **Whisper-accurate transcription** - powered by `faster-whisper`, from a 75 MB `tiny` model up to `large-v3`, including the fast `large-v3-turbo`, on CPU or NVIDIA GPU
 - 🌍 **Built-in translation** - 13 target languages via fully offline neural machine translation; Automatic picks the best free model for each language pair (OPUS-MT, Hy-MT2), with NLLB-200, MADLAD-400, and Argos to choose from, plus a meaning check that keeps each line faithful to the original
 - ✍️ **Real Roman Urdu, not academic transliteration** - a dedicated converter tuned for colloquial spelling ("kya haal hai", not diacritic-laden Sanskrit-style romanization)
@@ -131,6 +133,9 @@ Once published, installers will be available on the [Releases](https://github.co
 | --- | :---: | --- |
 | `CC-Gen-Ultimate_<version>_system_installer.exe` | ✅ | Shared / corporate machines |
 | `CC-Gen-Ultimate_<version>_user_installer.exe` | ❌ | Personal machines - recommended |
+| `CC-Gen-Ultimate_<version>_portable.7z` | ❌ | Running without installing: unpack the folder anywhere. It can't update itself |
+
+GitHub accepts release files under 2 GiB, so an installer above that size comes with parts named `..._installer-1.bin`, `-2.bin`, and so on: download them into the same folder as the `.exe` and run the `.exe`. A large portable archive is split the same way into `.7z.001`, `.7z.002`, ...; open the `.001` with 7-Zip. The `..._patch_installer.exe` files are small updates for the in-app updater, not for installing from scratch.
 
 Each installer comes in three editions, which differ only in the GPUs that speech recognition and voice cloning can use:
 
@@ -143,6 +148,10 @@ Each installer comes in three editions, which differ only in the GPUs that speec
 Every edition runs Piper and Kokoro voices on any DirectX 12 GPU (NVIDIA, AMD, or Intel), and everything falls back to the CPU when no GPU is available. If your NVIDIA GPU is outside an edition's range, **Preferences > Performance** says which edition can use it.
 
 Models (`faster-whisper`, translation models, transliteration models, and dubbing voices) download automatically on first use and are cached locally - no repeated downloads, no internet required afterward. **Models** in the title bar lists them all, with download and remove buttons.
+
+### Updating
+
+CC-Gen-Ultimate updates itself. Once a day it asks GitHub whether a newer version is out; an installed copy downloads the update for its own edition in the background and installs it when you close the app (an all-users install asks for administrator approval first). When the release's bundled runtime (PyTorch, CUDA, and the other libraries) matches the installed one, the update is a patch of tens of megabytes instead of the whole installer. Before anything runs, the update's publisher signature and the SHA-256 checksum of every file are checked. **Restart now** in the notice installs at once; a running job is never cut short. The portable folder shows a link to the new release instead. Both steps can be turned off in **Preferences > Updates**.
 
 ---
 
@@ -280,8 +289,10 @@ Japanese and Chinese are dubbed with voice cloning only: their stock voices need
 - ❌ No third-party analytics or tracking
 - ✅ All processing - transcription, translation, transliteration, dubbing - runs on your own CPU or GPU
 - ✅ Models are downloaded once, from their original open-source hosts, and cached locally forever after
+- ✅ The only other connection is the update check: at most once a day, one request to GitHub carrying the app's name and version, never your media, subtitles, or settings. Turn it off in **Preferences > Updates**
+- ✅ An update installs only when its publisher signature (ECDSA P-256, checked with Windows' own crypto) and every file's SHA-256 checksum match
 
-CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app process, bound only to `127.0.0.1` - nothing ever leaves your machine.
+CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app process, bound only to `127.0.0.1`, so your media and subtitles never leave your machine.
 
 ---
 
@@ -296,6 +307,7 @@ CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app pro
 | **Transliteration** | Default source/target script and engine (rule/neural) |
 | **Dubbing** | Default voices, speakers, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
 | **Subtitles** | Default formats, characters per line, lines per subtitle, default save folder |
+| **Updates** | Check for updates once a day, install them automatically when the app closes (both on by default), **Check now**, and when the last check ran |
 | **Advanced** | Logging on/off, log detail (warnings and errors / everything), open or clear the log files |
 
 All settings persist to `%APPDATA%\CC-Gen-Ultimate\settings.json` and apply to every tab and new workflow step automatically; changes you make on a tab stay in place for that session. Logs are written to `%APPDATA%\CC-Gen-Ultimate\logs`. Piper and Kokoro voices are stored in `%LOCALAPPDATA%\CC-Gen-Ultimate\voices` and translation models in `%LOCALAPPDATA%\CC-Gen-Ultimate\translation`; the other models live in the Hugging Face and Argos caches in your user folder.
@@ -345,7 +357,7 @@ cd ccgen/qml; pyside6-qmllint -I . -I components main.qml PreferencesWindow.qml 
 
 ```powershell
 pip install "pyinstaller>=6.17"
-.\scripts\build.ps1                  # both installers and the portable exe (standard NVIDIA edition)
+.\scripts\build.ps1                  # the system, user, and patch installers and the portable exe (standard NVIDIA edition)
 .\scripts\build.ps1 -LegacyNvidia    # the same, plus the Legacy NVIDIA edition of each
 .\scripts\build.ps1 -Gpu xpu         # the Intel GPU edition (-Gpu legacy builds only the Legacy one)
 .\scripts\build_user_installer.ps1   # or just one of them (also takes -Gpu and -LegacyNvidia)
@@ -353,7 +365,7 @@ pip install "pyinstaller>=6.17"
 
 Each build first installs the PyTorch build for its GPU edition and the DirectML build of ONNX Runtime into the active environment (see `Install-GpuRuntime` in `scripts/bundle.ps1`): PyTorch 2.8.0 for CUDA 12.8 in the standard edition, 2.8.0 for Intel XPU in the Intel GPU edition, and 2.7.1 for CUDA 12.6 in the Legacy NVIDIA edition, the newest PyTorch that still runs Maxwell GPUs. With `-LegacyNvidia`, the Legacy edition is built first, so the environment ends on the other edition's PyTorch.
 
-The PyInstaller options live in `scripts/bundle.ps1`, shared by every build script and the release workflow. After bundling, each build runs the app with `--self-test`, which imports every engine, loads the native libraries, decodes a short audio clip, loads the dubbing voices' pronunciation data and dictionaries, starts the local API, and compiles every QML screen. It also lists the GPUs each runtime can use. A module or DLL missing from the bundle stops the build with a report instead of reaching users. You can run the same check on any build yourself: `CC-Gen-Ultimate.exe --self-test report.txt`.
+The PyInstaller options live in `scripts/bundle.ps1`, shared by every build script and the release workflow. Every exe the build makes, the installers, and the Explorer extension `ccgen_shell.dll` carry CC-Gen-Ultimate's name as their product name and the version from `pyproject.toml`, as code signing requires. After bundling, each build runs the app with `--self-test`, which imports every engine, loads the native libraries, decodes a short audio clip, loads the dubbing voices' pronunciation data and dictionaries, starts the local API, and compiles every QML screen. It also lists the GPUs each runtime can use. A module or DLL missing from the bundle stops the build with a report instead of reaching users. You can run the same check on any build yourself: `CC-Gen-Ultimate.exe --self-test report.txt`.
 
 Every icon size and `CCGenUltimate.ico` are drawn by `scripts/make_icons.py`; after changing it, run `python scripts/make_icons.py` to regenerate them.
 ---
@@ -406,7 +418,7 @@ For significant changes, please [open an issue](https://github.com/ShahFaisalGfG
 | Target | Plan |
 |---|---|
 | **v1.0.0** | Initial Windows release - system & user Inno Setup installers on GitHub Releases |
-| **Shortly after** | `winget` package submission |
+| **Shortly after** | `winget` package submission, once the standard installer fits in one file under GitHub's 2 GiB limit |
 | **Later** | Linux packages (Flatpak / AppImage) |
 | **Later** | macOS package (`.dmg` / Homebrew) |
 | **Later** | Android release |

@@ -35,6 +35,19 @@ def get_settings_file() -> str:
     return os.path.join(here, "settings.json")
 
 
+def get_updates_dir() -> str:
+    """Where downloaded updates wait to be installed.
+
+    %LOCALAPPDATA%\\CC-Gen-Ultimate\\updates, which stays on this PC instead of roaming with the
+    profile (an update can be gigabytes); from source, the project's build folder.
+    """
+    if getattr(sys, "frozen", False):
+        local = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        return os.path.join(local, "CC-Gen-Ultimate", "updates")
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(os.path.dirname(here)), "build", "updates")
+
+
 def load_settings() -> dict[str, Any]:
     """Load settings from disk, merging with defaults for any missing keys."""
     path = get_settings_file()

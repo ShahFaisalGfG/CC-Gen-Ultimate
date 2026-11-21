@@ -228,6 +228,8 @@ Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\ccgen_shell.dll"""; F
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
+#include "shared.iss"
+
 [Code]
 function SystemInstallExists(): Boolean;
 var S: String;
@@ -240,10 +242,10 @@ begin
   Result := True;
   if SystemInstallExists() then
   begin
-    MsgBox(
+    SuppressibleMsgBox(
       'A system-wide installation of CC-Gen-Ultimate is already present.' + #13#10#13#10 +
       'Please use the system installer to update it.',
-      mbError, MB_OK);
+      mbError, MB_OK, IDOK);
     Result := False;
   end;
 end;
@@ -252,7 +254,7 @@ procedure InitializeWizard();
 begin
   WizardForm.WelcomeLabel2.Caption :=
     'This wizard will guide you through the installation of {#MyAppName}.'#13#13 +
-    'CC-Gen-Ultimate transcribes, translates, and transliterates video and audio files into subtitles - entirely offline.'#13#13 +
+    'CC-Gen-Ultimate transcribes, translates, and transliterates video and audio files into subtitles on this PC; your media never leaves it.'#13#13 +
     'It is recommended that you close all other applications before continuing.';
 end;
 
@@ -273,6 +275,7 @@ begin
     if FileExists(DllPath) then
       Exec(ExpandConstant('{sys}\regsvr32.exe'), '/s /u "' + DllPath + '"',
            '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    MoveShellDllAside();
     RemoveStaleSystemRegistryEntries();
   end;
 end;

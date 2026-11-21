@@ -47,6 +47,7 @@ class BootThread(QThread):
             import ccgen.controllers.performance_ctrl  # noqa: F401
             import ccgen.controllers.prefs_ctrl  # noqa: F401
             import ccgen.controllers.task_tabs  # noqa: F401
+            import ccgen.controllers.update_ctrl  # noqa: F401
             import ccgen.controllers.workflow_ctrl  # noqa: F401
 
             self.boot_ready.emit(api_server)

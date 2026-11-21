@@ -210,6 +210,19 @@ def _check_tls() -> None:
     print(f"    Qt TLS backend: {QSslSocket.activeBackend()} (available: {', '.join(backends)})")
 
 
+def _check_updates() -> None:
+    """The updater can work: HTTPS with Windows' trusted root certificates, and every signing key reads."""
+    import ssl
+
+    from ccgen.config.defaults import UpdateInfo
+    from ccgen.utils import signature
+
+    if not ssl.create_default_context().cert_store_stats().get("x509_ca"):
+        raise RuntimeError("no trusted root certificates were loaded")
+    for pem in UpdateInfo.PUBLIC_KEYS:
+        signature.public_point(pem)
+
+
 CHECKS: list[Check] = [
     ("Engines", _check_engines),
     ("Lazily imported modules", _check_lazy_modules),
@@ -220,6 +233,7 @@ CHECKS: list[Check] = [
     ("Embedded API server", _check_api_server),
     ("QML", _check_qml),
     ("Qt TLS", _check_tls),
+    ("Updates", _check_updates),
 ]
 
 

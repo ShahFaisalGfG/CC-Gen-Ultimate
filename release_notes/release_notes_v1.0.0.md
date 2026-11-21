@@ -15,6 +15,7 @@ The first Windows release of CC-Gen-Ultimate: a free, fully offline subtitle and
 - **GPU support.** With an NVIDIA GPU and CUDA installed, transcription runs on the GPU automatically. Dubbing uses NVIDIA, AMD, Intel, or Apple GPUs: Kokoro and Piper voices pick whichever device runs them fastest, OmniVoice voice cloning uses a strong GPU straight away and times a smaller one against the CPU, an Intel GPU edition runs transcription and voice cloning on Intel Arc and Core Ultra graphics, and a Legacy NVIDIA edition does the same on older NVIDIA GPUs such as the GeForce 940MX and GTX 900 series. If a GPU can't be used, the app falls back to the CPU on its own.
 - **Real batch processing.** Every file in the queue is processed, one after another, with per-file progress, status, and error messages. Cancel stops the current file and keeps the rest queued; Start picks up where you left off.
 - **No separate ffmpeg install.** Audio is decoded inside the app, so video and audio files work right after installing, with no temporary audio files written to disk. Videos without a sound track now fail with a clear message.
+- **Automatic updates.** Once a day the app checks GitHub for a new version, downloads the update for its own edition in the background, and installs it when you close the app; **Restart now** installs it at once without cutting a job short. When only the app changed, the update is a patch of tens of megabytes instead of the whole installer. Every update must carry the publisher's signature and match its SHA-256 checksums before it runs, downloads wait on a metered connection, and both steps can be turned off in Preferences > Updates.
 - **Large folders load instantly.** Adding a folder scans it and all subfolders in the background. Thousands of files appear within a second while the window stays responsive.
 
 ## Redesigned interface
@@ -26,7 +27,7 @@ The first Windows release of CC-Gen-Ultimate: a free, fully offline subtitle and
 - Every window resizes from any edge, follows the Windows light or dark theme (including switching while the app is open), and uses consistent icons and colors with readable contrast.
 - Tooltips explain every option, and download badges show which models are already on this computer.
 - Keyboard shortcuts: **Ctrl+O** add files, **Ctrl+Shift+O** add folder, **Ctrl+Enter** start, **Esc** cancel, **Ctrl+,** preferences, **Ctrl+M** manage models, **Ctrl+1 to Ctrl+5** switch tabs, **Delete** remove selected files, **F1** about.
-- Preferences are organized into Performance, Appearance, Transcription, Translation, Transliteration, Dubbing, Subtitles, and Advanced, and are saved together in one step. Options changed on a tab stay as set when preferences are saved.
+- Preferences are organized into Performance, Appearance, Transcription, Translation, Transliteration, Dubbing, Subtitles, Updates, and Advanced, and are saved together in one step. Options changed on a tab stay as set when preferences are saved.
 
 ## Fixes
 
@@ -57,3 +58,5 @@ The first Windows release of CC-Gen-Ultimate: a free, fully offline subtitle and
 ## Install
 
 Download one of the installers below. The per-user installer needs no administrator rights. Models download once, the first time each one is used, and work offline afterwards.
+
+An installer over GitHub's 2 GiB file limit comes with parts (`..._installer-1.bin`, `-2.bin`, ...): download them into the same folder as its `.exe` and run the `.exe`. The `.7z` (or `.7z.001` and the volumes after it) is the app unpacked into a folder, for running without installing; it can't update itself. The `..._patch_installer.exe` files are for the in-app updater.

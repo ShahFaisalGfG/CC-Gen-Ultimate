@@ -19,12 +19,34 @@ jobs:
   publish:
     runs-on: windows-latest
     steps:
+      # winget installs one installer file. An installer over GitHub's 2 GiB file limit is
+      # published as an exe with -N.bin parts (scripts/bundle.ps1), which winget can't use, so
+      # the submission is skipped with a warning.
+      - name: Check the installers are single files
+        id: single
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag   = "${{ github.event.inputs.tag }}"
+          $names = gh release view $tag --repo "${{ github.repository }}" --json assets --jq '.assets[].name'
+          if ($LASTEXITCODE -ne 0) { throw "gh release view failed (exit $LASTEXITCODE)" }
+          $parts = $names | Where-Object { $_ -match '^CC-Gen-Ultimate_[0-9.]+_(user|system)_installer-\d+\.bin$' }
+          if ($parts) {
+            Write-Output "::warning::The installers of $tag are split into parts ($($parts -join ', ')); winget can't install them, so nothing was submitted."
+            "split=true" | Out-File $env:GITHUB_OUTPUT -Append
+          } else {
+            "split=false" | Out-File $env:GITHUB_OUTPUT -Append
+          }
+
       - name: Download wingetcreate
+        if: steps.single.outputs.split == 'false'
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
 
       - name: Submit update to winget-pkgs
+        if: steps.single.outputs.split == 'false'
         shell: pwsh
         env:
           WINGET_PAT: ${{ secrets.WINGET_PAT }}

@@ -33,6 +33,7 @@ AppWindow {
         { name: "Transliteration", icon: "characters" },
         { name: "Dubbing", icon: "speaker" },
         { name: "Subtitles", icon: "captions" },
+        { name: "Updates", icon: "sync" },
         { name: "Advanced", icon: "info" }
     ]
 
@@ -110,11 +111,19 @@ AppWindow {
         outputDirText.text = saved("output.directory", "") || ""
         logsSwitch.checked = saved("logging.enable_logs", true)
         logLevelCombo.selectCode(saved("logging.log_level", "critical"))
+        autoCheckSwitch.checked = saved("updates.auto_check", true)
+        autoInstallSwitch.checked = saved("updates.auto_install", true)
         formatRepeater.model = prefsWin.formatModel()
         prefsWin._loading = false
         prefsWin.dirty = false
         prefsWin.revision++
         saveError.text = ""
+    }
+
+    // "Last checked 17 Nov 2026 10:42", or "" before the first check.
+    function lastChecked() {
+        var ms = updateController.lastCheckedMs
+        return ms > 0 ? "Last checked " + new Date(ms).toLocaleString(Qt.locale(), Locale.ShortFormat) : ""
     }
 
     // Every model choice and the voice cloning quality back to Automatic, so the profile decides again.
@@ -711,6 +720,75 @@ AppWindow {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontCaption
                             color: Theme.textMuted
+                        }
+                    }
+                }
+
+                // Updates
+                Page {
+                    Card {
+                        Layout.fillWidth: true
+                        title: "Updates"
+                        description: updateController.canSelfUpdate
+                            ? "CC-Gen-Ultimate asks GitHub at most once a day whether a newer version is out. The request carries only the app's name and version; your media, subtitles, and settings never leave this PC. An update installs only after its publisher signature and checksums match. When only the app changed, the update is a small patch instead of the whole installer."
+                            : "This copy runs from an unpacked folder, so it can't replace itself. CC-Gen-Ultimate still tells you when a new version is out, with a link to download it."
+                        FormRow {
+                            label: "Check automatically"
+                            hint: "Once a day while CC-Gen-Ultimate is open."
+                            Item { Layout.fillWidth: true }
+                            AppSwitch {
+                                id: autoCheckSwitch
+                                accessibleName: "Check for updates automatically"
+                                onToggled: prefsWin.set("updates.auto_check", checked)
+                            }
+                        }
+                        FormRow {
+                            visible: updateController.canSelfUpdate
+                            label: "Install automatically"
+                            hint: updateController.needsApproval
+                                ? "Downloads in the background and installs when you close CC-Gen-Ultimate, after Windows asks for administrator approval. Not on a metered connection."
+                                : "Downloads in the background and installs when you close CC-Gen-Ultimate. Not on a metered connection."
+                            Item { Layout.fillWidth: true }
+                            AppSwitch {
+                                id: autoInstallSwitch
+                                accessibleName: "Install updates automatically"
+                                onToggled: prefsWin.set("updates.auto_install", checked)
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spaceMd
+                            AppButton {
+                                text: "Check now"
+                                iconName: "sync"
+                                enabled: updateController.status !== "checking" && updateController.status !== "downloading"
+                                toolTipText: "Ask GitHub whether a newer version is out"
+                                onClicked: updateController.checkNow()
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text {
+                                    Layout.fillWidth: true
+                                    visible: text !== ""
+                                    text: updateController.message
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontCaption
+                                    color: updateController.status === "error" ? Theme.danger : Theme.text
+                                    wrapMode: Text.WordWrap
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    visible: text !== ""
+                                    text: prefsWin.lastChecked()
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.textMuted
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
                         }
                     }
                 }

@@ -52,7 +52,7 @@ AppWindow {
             compact: true
             text: "Preferences"
             iconName: "settings"
-            toolTipText: "Default settings, appearance, and logs (Ctrl+,)"
+            toolTipText: "Default settings, appearance, logs, and updates (Ctrl+,)"
             focusPolicy: Qt.TabFocus
             onClicked: mainWin.openPreferences()
         },
@@ -139,6 +139,14 @@ AppWindow {
         function onSettingsSaved() {
             prefsController.loadSettings()
             for (var i = 0; i < mainWin.tasks.length; i++) mainWin.tasks[i].controller.reloadDefaults()
+        }
+    }
+
+    // The result of Check now; Preferences and the About dialog show it in place while open.
+    Connections {
+        target: updateController
+        function onNotice(message) {
+            if (!mainWin._prefsWindow && !aboutDialog.visible) toast.show(message)
         }
     }
 
@@ -384,11 +392,39 @@ AppWindow {
             }
             Text {
                 Layout.fillWidth: true
-                text: appController.appDescription + ". Everything runs on this computer; nothing is uploaded."
+                text: appController.appDescription + ". Your media and subtitles are processed on this computer and never uploaded."
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 color: Theme.text
                 wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                spacing: Theme.spaceSm
+                AppButton {
+                    text: "Check for updates"
+                    iconName: "sync"
+                    enabled: updateController.status !== "checking" && updateController.status !== "downloading"
+                    toolTipText: "Ask GitHub whether a newer version of CC-Gen-Ultimate is out"
+                    onClicked: updateController.checkNow()
+                }
+                AppButton {
+                    kind: "ghost"
+                    text: "Releases"
+                    iconName: "openExternal"
+                    toolTipText: "Open the CC-Gen-Ultimate releases page in your browser"
+                    onClicked: updateController.openDownloadPage()
+                }
+            }
+            Text {
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: updateController.message
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+                color: updateController.status === "error" ? Theme.danger : Theme.textMuted
+                wrapMode: Text.WordWrap
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
             }
             Text {
                 Layout.fillWidth: true

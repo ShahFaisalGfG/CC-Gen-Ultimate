@@ -1,5 +1,6 @@
 # app.py - CC-Gen-Ultimate GUI entry point
 
+import configparser
 import logging
 import os
 import sys
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from ccgen.ui.boot_thread import BootThread
 from ccgen.ui.splash_screen import SplashScreen
+from ccgen.utils.app_mutex import hold_app_mutexes
 from ccgen.utils.helpers import resource_path
 from ccgen.utils.logging import configure_from_settings
 from ccgen.utils.settings import load_settings
@@ -26,6 +28,9 @@ from ccgen.utils.settings import load_settings
 _log = logging.getLogger(__name__)
 _SHUTDOWN_WAIT_MS = 2000
 _SELF_TEST_FLAG = "--self-test"
+# Written next to the exe by scripts\bundle.ps1 (Write-BuildInfo): the build's GPU edition and the
+# fingerprint of its bundled runtime, which decide the update package (patch or full installer).
+_BUILD_INFO = "build.ini"
 
 
 class _Startup:
@@ -42,6 +47,7 @@ class _Startup:
         self._prefs_ctrl = None
         self._assets_ctrl = None
         self._performance_ctrl = None
+        self._update_ctrl = None
 
         self._splash = SplashScreen(resource_path("ccgen/assets/icons/Square310x310Logo.scale-100.png"))
         self._splash.show()
@@ -66,6 +72,7 @@ class _Startup:
             TranslateController,
             TransliterateController,
         )
+        from ccgen.controllers.update_ctrl import UpdateController
         from ccgen.controllers.workflow_ctrl import WorkflowController
         from ccgen.models.file_model import SUBTITLE_EXTS
 
@@ -92,6 +99,9 @@ class _Startup:
             prefs_ctrl = PrefsController(api_server.base_url)
             assets_ctrl = AssetsController(api_server.base_url)
             performance_ctrl = PerformanceController(api_server.base_url)
+            update_ctrl = UpdateController(_update_config())
+            update_ctrl.set_busy_sources([*task_ctrls.values(), assets_ctrl])
+            prefs_ctrl.settingsChanged.connect(update_ctrl.preferencesChanged)
             if self._input_paths:
                 # Files opened with the app (e.g. from Explorer's context menu): media gets
                 # subtitles generated, subtitle files are offered for translation.
@@ -107,6 +117,7 @@ class _Startup:
             ctx.setContextProperty("prefsController",  prefs_ctrl)
             ctx.setContextProperty("modelsController", assets_ctrl)
             ctx.setContextProperty("performanceController", performance_ctrl)
+            ctx.setContextProperty("updateController", update_ctrl)
             for name, controller in task_ctrls.items():
                 ctx.setContextProperty(name, controller)
 
@@ -127,6 +138,7 @@ class _Startup:
             self._prefs_ctrl = prefs_ctrl
             self._assets_ctrl = assets_ctrl
             self._performance_ctrl = performance_ctrl
+            self._update_ctrl = update_ctrl
             root = engine.rootObjects()[0]
             self._splash.close()
             if isinstance(root, QQuickWindow):
@@ -136,6 +148,7 @@ class _Startup:
                 _log.info("Window created (non-QQuickWindow root)")
             # After the window shows: detection imports torch, and its result only refines choices.
             performance_ctrl.detect()
+            update_ctrl.start()
         except Exception as e:
             _log.critical("Failed to build interface: %r", e, exc_info=True)
             self._on_failed(str(e))
@@ -151,6 +164,8 @@ class _Startup:
     def shutdown(self) -> None:
         """Tear down the QML scene and controllers, then stop the API server."""
         try:
+            if self._update_ctrl is not None:
+                self._update_ctrl.shutdown()
             for controller in self._task_ctrls.values():
                 controller.shutdown()
             # The controllers' cancel requests need the event loop, which has stopped by now,
@@ -176,6 +191,78 @@ class _Startup:
         except Exception:
             _log.warning("Error during shutdown", exc_info=True)
 
+    def install_update(self) -> None:
+        """Hand a downloaded update to its installer; the last step before the process exits."""
+        if self._update_ctrl is not None:
+            self._update_ctrl.install_on_exit()
+            self._update_ctrl = None
+
+
+def _build_info() -> tuple[str, str]:
+    """(GPU edition, runtime fingerprint) from build.ini next to the exe; ("", "") from source."""
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), _BUILD_INFO), encoding="utf-8")
+    except (configparser.Error, OSError, UnicodeDecodeError) as error:
+        _log.warning("Could not read %s: %s", _BUILD_INFO, error)
+        return "", ""
+    return parser.get("build", "edition", fallback=""), parser.get("build", "runtime_id", fallback="")
+
+
+def _update_config():
+    """The updater's settings for this copy: feed and keys, edition, state, preferences, and log.
+
+    The update modules were imported by the boot thread. A local staging build (scripts\\bundle.ps1
+    -UpdateFeed) adds ccgen\\config\\update_staging.py, which points the feed at a test server with
+    a test key; release builds never contain it.
+    """
+    from ccgen.config.defaults import AppInfo, UpdateDefaults, UpdateInfo
+    from ccgen.controllers.update_ctrl import UpdaterConfig
+    from ccgen.services.update_feed import UpdateSource
+    from ccgen.services.update_install import STATE_FILE, SYSTEM
+    from ccgen.utils.app_mutex import release_app_mutexes
+    from ccgen.utils.settings import get_settings_file, get_updates_dir
+
+    try:
+        from ccgen.config import update_staging  # type: ignore[attr-defined]
+    except ImportError:
+        update_staging = None
+
+    def read_prefs() -> tuple[bool, bool]:
+        updates = load_settings().get("updates", {})
+        return (bool(updates.get("auto_check", UpdateDefaults.AUTO_CHECK)),
+                bool(updates.get("auto_install", UpdateDefaults.AUTO_INSTALL)))
+
+    def log(message: str, error: bool) -> None:
+        _log.log(logging.WARNING if error else logging.INFO, message)
+
+    def extra_args(kind: str, package) -> list[str]:
+        # The patch installer serves both install kinds: it takes the kind and folder of this copy.
+        if package.kind != "patch":
+            return []
+        folder = os.path.dirname(os.path.abspath(sys.executable))
+        return ["/ALLUSERS" if kind == SYSTEM else "/CURRENTUSER", f'/DIR="{folder}"']
+
+    edition, runtime_id = _build_info()
+    source = UpdateSource(
+        app=AppInfo.APP_NAME,
+        version=AppInfo.APP_VERSION,
+        base_url=getattr(update_staging, "BASE_URL", UpdateInfo.REPO_URL),
+        public_keys=tuple(getattr(update_staging, "PUBLIC_KEYS", UpdateInfo.PUBLIC_KEYS)),
+        allow_local_http=update_staging is not None,
+    )
+    return UpdaterConfig(
+        source=source,
+        state_path=os.path.join(os.path.dirname(get_settings_file()), STATE_FILE),
+        downloads_dir=get_updates_dir(),
+        read_prefs=read_prefs,
+        log=log,
+        release_locks=release_app_mutexes,
+        edition=edition,
+        runtime_id=runtime_id,
+        extra_args=extra_args,
+    )
+
 
 def main() -> None:
     """Initialise the Qt application, show the splash, and boot the app in the background.
@@ -199,6 +286,7 @@ def main() -> None:
     _log.debug("QML style set to Material")
 
     app = QApplication(sys.argv)
+    hold_app_mutexes()  # the installers wait while CC-Gen-Ultimate runs
     # Qt's automatic quit-on-last-window-closed can misfire the instant the
     # splash (a QWidget) closes while a QML window is the only one left open -
     # main.qml's root window quits explicitly on close instead (see main.qml).
@@ -206,6 +294,7 @@ def main() -> None:
     startup = _Startup(app)
     code = app.exec()
     startup.shutdown()
+    startup.install_update()
     sys.exit(code)
 
 

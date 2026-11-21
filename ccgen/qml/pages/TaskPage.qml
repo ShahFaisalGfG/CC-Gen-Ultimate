@@ -153,6 +153,7 @@ Item {
         RunBar {
             Layout.fillWidth: true
             controller: page.controller
+            updates: updateController  // qmllint disable unqualified
         }
     }
 }
