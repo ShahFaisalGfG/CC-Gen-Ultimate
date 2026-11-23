@@ -157,12 +157,15 @@ jobs:
       # when it reaches the 2 GiB limit; 7-Zip opens the .001 with the rest beside it. It can't
       # replace itself, so the app links to new releases instead. No one-file exe is published:
       # it would be over the limit and unpack gigabytes to %TEMP% at every start.
+      # The bundle's folder is given to 7-Zip as a full path: 7-Zip keeps a relative path's folders
+      # in the archive, which would put the app under dist\<App>\ instead of at its top.
       - name: Pack the portable folder
         shell: pwsh
         run: |
           . .\scripts\bundle.ps1
           $archive = "release\${{ steps.meta.outputs.APP_NAME }}_${{ steps.meta.outputs.VER }}${{ steps.meta.outputs.SUFFIX }}_portable.7z"
-          & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=9 $archive "dist\${{ steps.meta.outputs.APP_NAME }}\*"
+          $bundle = (Resolve-Path "dist\${{ steps.meta.outputs.APP_NAME }}").Path
+          & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx=9 $archive "$bundle\*"
           if ($LASTEXITCODE -ne 0) { throw "7z: portable archive failed (exit $LASTEXITCODE)" }
           $null = Split-ReleaseFile $archive
 
