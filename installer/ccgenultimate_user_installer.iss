@@ -44,8 +44,8 @@ AppUpdatesURL={#MyAppURL}
 ; Install per-user (no admin privileges required)
 PrivilegesRequired=lowest
 
-; Install to per-user AppData (Roaming) for current user
-DefaultDirName={userappdata}\{#MyAppName}
+; This user's programs folder (Local), apart from the settings and logs in %APPDATA%\CC-Gen-Ultimate
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\build\installer
@@ -278,7 +278,11 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM ccgen.exe"; Flags: runhidden
 Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\ccgen_shell.dll"""; Flags: runhidden; RunOnceId: "UnregShellExt"
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}"
+; Installed files are removed by the uninstaller itself. The folder goes only when it is empty, so
+; installing into a folder that already held other files can never cost those files. This user's
+; settings and logs (%APPDATA%\CC-Gen-Ultimate) and models (%LOCALAPPDATA%\CC-Gen-Ultimate and the
+; Hugging Face and Argos caches) are kept for a reinstall.
+Type: dirifempty; Name: "{app}"
 
 #include "shared.iss"
 

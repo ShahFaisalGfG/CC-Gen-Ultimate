@@ -16,7 +16,7 @@ metadata:
 
 1. `ccgen --version`: the installers can add it to PATH.
 2. Otherwise run it from the install folder:
-   - `%APPDATA%\CC-Gen-Ultimate\ccgen.exe` (installed for one user)
+   - `%LOCALAPPDATA%\Programs\CC-Gen-Ultimate\ccgen.exe` (installed for one user)
    - `%ProgramFiles%\CC-Gen-Ultimate\ccgen.exe` (installed for all users)
    - `ccgen.exe` in the folder unpacked from the portable `.7z`
 3. From a clone of the repository: `python -m ccgen` (Python 3.12, with `pip install -r requirements.txt`).

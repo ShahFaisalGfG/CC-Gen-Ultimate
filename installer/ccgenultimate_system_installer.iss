@@ -285,7 +285,10 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM ccgen.exe"; Flags: runhidden
 Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\ccgen_shell.dll"""; Flags: runhidden; RunOnceId: "UnregShellExt"
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}"
+; Installed files are removed by the uninstaller itself. The folder goes only when it is empty, so
+; installing into a folder that already held other files can never cost those files. Each user's
+; settings, logs, and models live in their own profile and are kept for a reinstall.
+Type: dirifempty; Name: "{app}"
 
 #include "shared.iss"
 
