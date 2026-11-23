@@ -137,6 +137,8 @@ Once published, installers will be available on the [Releases](https://github.co
 | `CC-Gen-Ultimate_<version>_user_installer.exe` | ❌ | Personal machines - recommended |
 | `CC-Gen-Ultimate_<version>_portable.7z` | ❌ | Running without installing: unpack the folder anywhere. It can't update itself |
 
+The system installer puts the app in `C:\Program Files\CC-Gen-Ultimate` and the per-user installer in `%LOCALAPPDATA%\Programs\CC-Gen-Ultimate`. Uninstalling removes the program and keeps your settings, logs, and downloaded models, so a reinstall picks up where you left off.
+
 GitHub accepts release files under 2 GiB, so an installer above that size comes with parts named `..._installer-1.bin`, `-2.bin`, and so on: download them into the same folder as the `.exe` and run the `.exe`. A large portable archive is split the same way into `.7z.001`, `.7z.002`, ...; open the `.001` with 7-Zip. The `..._patch_installer.exe` files are small updates for the in-app updater, not for installing from scratch.
 
 Each installer comes in three editions, which differ only in the GPUs that speech recognition and voice cloning can use:
@@ -448,7 +450,7 @@ Contributions of all kinds are welcome - bug reports, fixes, new features, trans
    - `pytest` passes
    - `pyright` passes on all edited Python files
    - `qmllint` passes on all edited `.qml` files
-4. Commit with a clear message and open a **Pull Request** targeting the `development` branch
+4. Commit with a clear message and open a **Pull Request** targeting the `dev` branch
 
 For significant changes, please [open an issue](https://github.com/ShahFaisalGfG/CC-Gen-Ultimate/issues) first to discuss the approach.
 
