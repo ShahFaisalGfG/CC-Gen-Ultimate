@@ -310,6 +310,81 @@ begin
       '{7BFA27A3-AF1F-45DD-9F5F-CBCF2A9CEB81}_is1', 'UninstallString', UninstStr);
 end;
 
+var
+  UserDataMoved: Boolean;
+
+// This user's data folders, which the copy installed for all users reads too: Roaming holds the
+// settings, workflows, and logs, Local the translation models and voices.
+function RoamingDir(): String;
+begin
+  Result := ExpandConstant('{userappdata}\{#MyAppName}');
+end;
+
+function LocalDir(): String;
+begin
+  Result := ExpandConstant('{localappdata}\{#MyAppName}');
+end;
+
+// Where a folder's items wait while the per-user copy is removed.
+function KeptDir(const Dir: String): String;
+begin
+  Result := Dir + ' (kept by Setup)';
+end;
+
+// Moves the file or folder Name from FromDir to ToDir; True when it moved.
+function MoveDataItem(const Name, FromDir, ToDir: String): Boolean;
+var
+  Source, Target: String;
+begin
+  Result := False;
+  Source := AddBackslash(FromDir) + Name;
+  Target := AddBackslash(ToDir) + Name;
+  if not FileExists(Source) and not DirExists(Source) then
+    Exit;
+  if FileExists(Target) or DirExists(Target) then
+    Log('Left ' + Source + ' where it is: ' + Target + ' already exists')
+  else if not ForceDirectories(ToDir) then
+    Log('Could not create ' + ToDir)
+  else
+  begin
+    Result := RenameFile(Source, Target);
+    if not Result then
+      Log('Could not move ' + Source + ' to ' + Target);
+  end;
+end;
+
+// The per-user uninstaller deletes this user's data, so it moves aside until that copy is gone.
+// That copy's update state (updates.json) and downloaded updates go with it. Keep in step with
+// the user installer's [UninstallDelete].
+procedure KeepUserData();
+begin
+  if MoveDataItem('settings.json', RoamingDir(), KeptDir(RoamingDir())) then
+    UserDataMoved := True;
+  if MoveDataItem('workflows.json', RoamingDir(), KeptDir(RoamingDir())) then
+    UserDataMoved := True;
+  if MoveDataItem('logs', RoamingDir(), KeptDir(RoamingDir())) then
+    UserDataMoved := True;
+  if MoveDataItem('translation', LocalDir(), KeptDir(LocalDir())) then
+    UserDataMoved := True;
+  if MoveDataItem('voices', LocalDir(), KeptDir(LocalDir())) then
+    UserDataMoved := True;
+end;
+
+// Puts back what KeepUserData moved; a later call does nothing.
+procedure RestoreUserData();
+begin
+  if not UserDataMoved then
+    Exit;
+  MoveDataItem('settings.json', KeptDir(RoamingDir()), RoamingDir());
+  MoveDataItem('workflows.json', KeptDir(RoamingDir()), RoamingDir());
+  MoveDataItem('logs', KeptDir(RoamingDir()), RoamingDir());
+  RemoveDir(KeptDir(RoamingDir()));
+  MoveDataItem('translation', KeptDir(LocalDir()), LocalDir());
+  MoveDataItem('voices', KeptDir(LocalDir()), LocalDir());
+  RemoveDir(KeptDir(LocalDir()));
+  UserDataMoved := False;
+end;
+
 function InitializeSetup(): Boolean;
 var
   UninstStr: String;
@@ -320,7 +395,7 @@ begin
   begin
     if SuppressibleMsgBox(
       'A per-user installation of CC-Gen-Ultimate was found.' + #13#10#13#10 +
-      'Click Yes to remove it and continue with the system-wide installation.' + #13#10 +
+      'Click Yes to remove it and continue with the system-wide installation. Your settings, workflows, logs, and downloaded models are kept.' + #13#10 +
       'Click No to cancel - then use the per-user installer to update instead.',
       mbConfirmation, MB_YESNO, IDNO) = IDNO then
     begin
@@ -328,9 +403,17 @@ begin
       Exit;
     end;
     if GetUserUninstallStr(UninstStr) then
+    begin
+      KeepUserData();
       Exec(RemoveQuotes(UninstStr), '/VERYSILENT /NORESTART', '',
            SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
   end;
+end;
+
+procedure DeinitializeSetup();
+begin
+  RestoreUserData();
 end;
 
 procedure InitializeWizard();
@@ -362,5 +445,7 @@ begin
            '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     MoveShellDllAside();
     RemoveStaleUserRegistryEntries();
-  end;
+  end
+  else if CurStep = ssPostInstall then
+    RestoreUserData();
 end;

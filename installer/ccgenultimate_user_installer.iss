@@ -278,10 +278,20 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM ccgen.exe"; Flags: runhidden
 Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\ccgen_shell.dll"""; Flags: runhidden; RunOnceId: "UnregShellExt"
 
 [UninstallDelete]
-; Installed files are removed by the uninstaller itself. The folder goes only when it is empty, so
-; installing into a folder that already held other files can never cost those files. This user's
-; settings and logs (%APPDATA%\CC-Gen-Ultimate) and models (%LOCALAPPDATA%\CC-Gen-Ultimate and the
-; Hugging Face and Argos caches) are kept for a reinstall.
+; Installed files are removed by the uninstaller itself. This user's settings, workflows, update
+; state, and logs (Roaming) and the downloaded updates, translation models, and voices (Local) go
+; too. The Hugging Face, Argos, and Coqui caches other programs can share stay, and so do the
+; subtitles and dubbed files the app made. Folders go only when empty, so a folder that held other
+; files keeps them.
+Type: files; Name: "{userappdata}\{#MyAppName}\settings.json"
+Type: files; Name: "{userappdata}\{#MyAppName}\settings.json.tmp"
+Type: files; Name: "{userappdata}\{#MyAppName}\workflows.json"
+Type: files; Name: "{userappdata}\{#MyAppName}\workflows.json.tmp"
+Type: files; Name: "{userappdata}\{#MyAppName}\updates.json"
+Type: files; Name: "{userappdata}\{#MyAppName}\updates.json.tmp"
+Type: filesandordirs; Name: "{userappdata}\{#MyAppName}\logs"
+Type: dirifempty; Name: "{userappdata}\{#MyAppName}"
+Type: filesandordirs; Name: "{localappdata}\{#MyAppName}"
 Type: dirifempty; Name: "{app}"
 
 #include "shared.iss"

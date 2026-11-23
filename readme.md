@@ -137,7 +137,7 @@ Once published, installers will be available on the [Releases](https://github.co
 | `CC-Gen-Ultimate_<version>_user_installer.exe` | ❌ | Personal machines - recommended |
 | `CC-Gen-Ultimate_<version>_portable.7z` | ❌ | Running without installing: unpack the folder anywhere. It can't update itself |
 
-The system installer puts the app in `C:\Program Files\CC-Gen-Ultimate` and the per-user installer in `%LOCALAPPDATA%\Programs\CC-Gen-Ultimate`. Uninstalling removes the program and keeps your settings, logs, and downloaded models, so a reinstall picks up where you left off.
+The system installer puts the app in `C:\Program Files\CC-Gen-Ultimate` and the per-user installer in `%LOCALAPPDATA%\Programs\CC-Gen-Ultimate`. Uninstalling a per-user copy also removes your settings, workflows, and logs (`%APPDATA%\CC-Gen-Ultimate`) and the translation models, voices, and downloaded updates (`%LOCALAPPDATA%\CC-Gen-Ultimate`). Uninstalling the all-users copy keeps each user's data, and the system installer keeps your settings, workflows, logs, and models when it replaces a per-user copy. The Hugging Face and Argos model caches, which other programs can share, and the subtitles and dubbed files you made always stay.
 
 GitHub accepts release files under 2 GiB, so an installer above that size comes with parts named `..._installer-1.bin`, `-2.bin`, and so on: download them into the same folder as the `.exe` and run the `.exe`. A large portable archive is split the same way into `.7z.001`, `.7z.002`, ...; open the `.001` with 7-Zip. The `..._patch_installer.exe` files are small updates for the in-app updater, not for installing from scratch.
 
