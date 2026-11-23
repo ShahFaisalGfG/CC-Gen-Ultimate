@@ -17,6 +17,8 @@ Item {
 
     signal sendRequested(string target, string path, var outputs)
     signal notice(string message)
+    // "Change" beside what the tab relies on: open the Preferences.
+    signal preferencesRequested()
 
     function openFiles() { queuePanel.openFiles() }
     function openFolder() { queuePanel.openFolder() }
@@ -25,6 +27,60 @@ Item {
     Connections {
         target: page.controller
         function onNotice(message) { page.notice(message) }
+        function onExistingFound(count, example) {
+            existingDialog.count = count
+            existingDialog.example = example
+            existingDialog.open()
+        }
+    }
+
+    // Asked once per run when results are already there; nothing is replaced without an answer.
+    AppDialog {
+        id: existingDialog
+        property int count: 0
+        property string example: ""
+        parent: Overlay.overlay
+        title: existingDialog.count === 1 ? "Its results are already there" : "Some results are already there"
+        width: Math.min(460, page.width - 48)
+        standardButtons: Dialog.Cancel
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Theme.spaceMd
+            Text {
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                text: (existingDialog.count === 1
+                       ? existingDialog.example + " already has its results, such as its subtitle file."
+                       : existingDialog.count + " files, such as " + existingDialog.example + ", already have results.")
+                    + " What should happen to them?"
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                color: Theme.text
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spaceSm
+                AppButton {
+                    kind: "primary"
+                    text: "Keep both"
+                    toolTipText: "Keep the old files; the new ones get \" (2)\" in their names"
+                    onClicked: { existingDialog.close(); page.controller.startWith("keep_both") }
+                }
+                AppButton {
+                    text: "Skip them"
+                    toolTipText: "Leave those files out of this run"
+                    onClicked: { existingDialog.close(); page.controller.startWith("skip") }
+                }
+                AppButton {
+                    kind: "danger"
+                    text: "Replace"
+                    toolTipText: "Write the new files over the old ones"
+                    onClicked: { existingDialog.close(); page.controller.startWith("replace") }
+                }
+            }
+        }
     }
 
     ColumnLayout {
@@ -61,6 +117,7 @@ Item {
 
             ColumnLayout {
                 SplitView.fillWidth: true
+                SplitView.minimumWidth: 320
                 spacing: 0
 
                 TabBar {
@@ -100,8 +157,11 @@ Item {
                         contentWidth: availableWidth
                         clip: true
 
+                        FocusScroll { flickable: settingsPage.contentItem as Flickable }
+
                         ColumnLayout {
-                            width: settingsPage.availableWidth
+                            // Settings read best in a column; maximized, the rest stays empty.
+                            width: Math.min(settingsPage.availableWidth, 760 + 2 * Theme.spaceXl)
                             spacing: Theme.spaceLg
 
                             Item { Layout.preferredHeight: Theme.spaceXs }
@@ -119,11 +179,44 @@ Item {
                                     id: lockedText
                                     anchors.fill: parent
                                     anchors.margins: Theme.spaceMd
+                                    textFormat: Text.PlainText
                                     text: "Settings are locked while files are processing. Changes apply to the next run."
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontCaption
                                     color: Theme.text
                                     wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            // What the tab runs with besides its own options (the saved Generate model, and
+                            // for dubbing the translation model), so nothing it relies on is hidden.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: Theme.spaceXl
+                                Layout.rightMargin: Theme.spaceXl
+                                visible: page.controller.reliesOn.length > 0
+                                spacing: Theme.spaceSm
+
+                                Icon {
+                                    name: "info"
+                                    size: Theme.iconMd
+                                    color: Theme.textMuted
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    textFormat: Text.PlainText
+                                    text: page.controller.reliesOn
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.textMuted
+                                    wrapMode: Text.WordWrap
+                                }
+                                AppButton {
+                                    kind: "ghost"
+                                    compact: true
+                                    text: "Change"
+                                    toolTipText: "Choose these in Preferences (Ctrl+,)"
+                                    onClicked: page.preferencesRequested()
                                 }
                             }
 
@@ -154,6 +247,8 @@ Item {
             Layout.fillWidth: true
             controller: page.controller
             updates: updateController  // qmllint disable unqualified
+            models: modelsController  // qmllint disable unqualified
+            onLanguageRequested: path => queuePanel.showRow(path)
         }
     }
 }

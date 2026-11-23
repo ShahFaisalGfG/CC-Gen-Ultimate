@@ -1,10 +1,12 @@
 # helpers.py - path and formatting utilities for CC-Gen-Ultimate
+#
+# Standard library only: the command line and the engine use these too, without Qt.
 
 import os
 import sys
 from typing import Any
-
-from PySide6.QtCore import QUrl
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 
 def resource_path(relative: str) -> str:
@@ -31,8 +33,29 @@ def to_local_path(value: Any) -> str:
     else:
         text = str(value)
         if text.startswith("file:"):
-            text = QUrl(text).toLocalFile()
+            text = file_url_path(text)
     return os.path.normpath(text) if text else ""
+
+
+def file_url_path(url: str) -> str:
+    r"""The local path of a file:// URL ("file:///C:/a%20b.mp4" -> "C:\a b.mp4"), UNC shares included."""
+    parsed = urlparse(url)
+    # Windows' url2pathname decodes %xx itself.
+    path = url2pathname(parsed.path) if os.name == "nt" else unquote(parsed.path)
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        return "\\\\" + parsed.netloc + path if os.name == "nt" else f"//{parsed.netloc}{path}"
+    return path
+
+
+def duration_text(seconds: float) -> str:
+    """A duration as people say it: "45 s", "3 min", "1 h 05 min"."""
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d} min"
 
 
 def format_seconds(seconds: float) -> str:

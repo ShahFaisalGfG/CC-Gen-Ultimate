@@ -109,6 +109,17 @@ ColumnLayout {
 
         Keys.onUpPressed: flick(0, 800)
         Keys.onDownPressed: flick(0, -800)
+
+        // Keyboard focus is shown, as on every other focusable part of the window.
+        Rectangle {
+            anchors.fill: parent
+            z: 10
+            color: "transparent"
+            radius: Theme.radius
+            border.width: 2
+            border.color: Theme.focusRing
+            visible: list.activeFocus
+        }
     }
 
     ColumnLayout {

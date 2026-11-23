@@ -134,12 +134,18 @@ class TestRun:
     def test_missing_input_fails_without_raising(self, tmp_path, engine):
         task = GenerateTask(GenerateConfig(input_path=str(tmp_path / "gone.mp4")))
         result = task.run()
-        assert not result.success and "File not found" in result.error
+        assert not result.success and "gone.mp4 isn't there any more" in result.error
 
     def test_engine_error_becomes_failed_result(self, tmp_path, engine):
         engine.transcribe.side_effect = RuntimeError("decoder crashed")
         result = GenerateTask(_config(tmp_path)).run()
-        assert not result.success and result.error == "decoder crashed"
+        assert not result.success and "Something went wrong" in result.error
+        assert result.error_detail == "RuntimeError: decoder crashed"
+
+    def test_out_of_gpu_memory_says_what_to_do(self, tmp_path, engine):
+        engine.transcribe.side_effect = RuntimeError("CUDA failed with error out of memory")
+        result = GenerateTask(_config(tmp_path)).run()
+        assert result.error.startswith("The graphics card ran out of memory.")
 
     def test_cancel_during_transcription(self, tmp_path, engine, sample_segments):
         task = GenerateTask(_config(tmp_path))

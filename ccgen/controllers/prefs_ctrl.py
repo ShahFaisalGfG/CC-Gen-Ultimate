@@ -94,13 +94,15 @@ class PrefsController(QObject):
                      else {code: label for label, code, _ in DubbingDefaults.MODES}[dub.mode])
         if dub.mode == DubbingDefaults.MODE_OMNIVOICE:
             dub_label += ", fast mode" if dub.fast else ", full quality"
+        # The quality only changes OmniVoice; Automatic on the Light profile uses stock voices.
+        dub_by_hand = mode != AUTO or (quality != AUTO and dub.mode == DubbingDefaults.MODE_OMNIVOICE)
         return [
             _summary_row("Subtitle generation", automatic["Subtitle generation"], whisper != AUTO, f"Whisper {whisper}"),
             _summary_row("Translation", automatic["Translation"], engine != AUTO,
                          translation_engine_info(engine).label if engine != AUTO else ""),
             _summary_row("Transliteration", automatic["Transliteration"], translit != AUTO,
                          translit_labels.get(translit, "")),
-            _summary_row("Dubbing", automatic["Dubbing"], (mode, quality) != (AUTO, AUTO), dub_label),
+            _summary_row("Dubbing", automatic["Dubbing"], dub_by_hand, dub_label),
         ]
 
     @Slot(str, "QVariantMap", "QVariantMap", result=str)
@@ -123,6 +125,8 @@ class PrefsController(QObject):
             return dict((code, label) for label, code in TransliterationDefaults.ENGINES)[engine]
         if kind == "dub" and options.get("mode") == AUTO:
             choice = profiles.dub_engine(AUTO, profile, str(options.get("quality") or AUTO))
+            if choice.mode not in CLONING_ENGINES:
+                return dict(profiles.describe(profile))["Dubbing"]  # the Light profile's stock voices
             return f"{ENGINE_LABELS[choice.mode]} voice cloning, {'fast mode' if choice.fast else 'full quality'}"
         return ""
 
@@ -220,8 +224,10 @@ class PrefsController(QObject):
 
     @Property(list, constant=True)
     def translitSourceOptions(self) -> list:
-        """Scripts a tab or workflow step converts from; "auto" uses the script of the text's language."""
-        return _items([("Automatic (from the language)", TransliterationDefaults.SOURCE_AUTO)] + TransliterationDefaults.SCHEMES)
+        """Scripts the Transliterate tab, workflow steps, and its default in Preferences convert from;
+        "auto" uses the script of each subtitle's language."""
+        automatic = ("Automatic (from the subtitle's language)", TransliterationDefaults.SOURCE_AUTO)
+        return _items([automatic] + TransliterationDefaults.SCHEMES)
 
     @Property(list, constant=True)
     def translitEngineOptions(self) -> list:

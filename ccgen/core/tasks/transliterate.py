@@ -89,7 +89,9 @@ class TransliterateTask(Task[TransliterateConfig]):
         converted = transliterate_track(track, self._engine, cfg.source_scheme, cfg.target_scheme, ctx)
         ctx.status("Writing subtitle files...")
         suffix = transliteration_suffix(cfg.source_scheme, cfg.target_scheme)
-        files = write_track(converted, cfg.input_path, suffix, cfg.formats, self._layout, cfg.output_dir)
+        files = write_track(
+            converted, cfg.input_path, suffix, cfg.formats, self._layout, cfg.output_dir, cfg.existing, ctx.warn,
+        )
         return TaskResult(
             success=True, input_path=cfg.input_path, output_files=files,
             detected_language=track.language, output_languages=dict.fromkeys(files, track.language),

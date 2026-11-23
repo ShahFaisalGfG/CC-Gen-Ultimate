@@ -29,6 +29,8 @@ logs/
 # Preferences written when running from source (installed builds use %APPDATA%); the defaults
 # live in ccgen/config/defaults.py.
 ccgen/utils/settings.json
+# The Workflow tab's saved workflows when run from source (ccgen/utils/workflow_presets.py)
+ccgen/utils/workflows.json
 
 # ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/

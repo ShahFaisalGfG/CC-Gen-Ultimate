@@ -2,10 +2,11 @@
 
 Usage: python scripts/runtime_id.py BUNDLE_DIR --edition cuda|legacy|xpu [--exe CC-Gen-Ultimate.exe]
 
-An installed copy is two layers. The app layer is what changes in most releases: the exe (it holds
-every Python module, PyInstaller's PYZ), the QML and assets in _internal\\ccgen, the licence texts,
-and build.ini. The runtime layer is everything else: PyTorch and CUDA, Qt, and the other libraries
-and their data in _internal, plus ccgen_shell.dll. The fingerprint is the SHA-256 over the runtime
+An installed copy is two layers. The app layer is what changes in most releases: the exe and
+ccgen.exe (each holds every Python module, PyInstaller's PYZ), the QML and assets in
+_internal\\ccgen, the Agent Skill in _internal\\skills, the licence texts, and build.ini. The
+runtime layer is everything else: PyTorch and CUDA, Qt, and the other libraries and their data in
+_internal, plus ccgen_shell.dll. The fingerprint is the SHA-256 over the runtime
 layer's file names, sizes, and contents. When a release's fingerprint matches an installed copy's,
 the in-app updater installs the small patch installer (the app layer only,
 installer/ccgenultimate_patch_installer.iss) instead of the whole edition.
@@ -22,8 +23,9 @@ import sys
 BUILD_INFO = "build.ini"
 EDITIONS = ("cuda", "legacy", "xpu")
 # Paths relative to the bundle, lowercase, with "/" separators. A folder ends with "/".
-APP_LAYER_FILES = frozenset({BUILD_INFO, "_internal/license", "_internal/third_party_notices.md"})
-APP_LAYER_FOLDERS = ("_internal/ccgen/",)
+# ccgen.exe, the command line, holds the Python modules as the app's exe does.
+APP_LAYER_FILES = frozenset({BUILD_INFO, "ccgen.exe", "_internal/license", "_internal/third_party_notices.md"})
+APP_LAYER_FOLDERS = ("_internal/ccgen/", "_internal/skills/")
 _CHUNK = 4 * 1024 * 1024
 
 

@@ -1,6 +1,5 @@
 // qmllint disable unqualified
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"
 
@@ -138,19 +137,16 @@ ColumnLayout {
         FormRow {
             label: "Fastest speech"
             hint: "Lines that don't fit their time are spoken faster up to this speed, then may run up to a second over; only longer ones are cut short."
-            SpinBox {
+            StyledSpinBox {
                 from: Math.round(prefsController.speedupRange[0] * 100)
                 to: Math.round(prefsController.speedupRange[1] * 100)
                 stepSize: 5
-                editable: true
                 value: Math.round((root.options.max_speedup || 1) * 100)
                 textFromValue: (value, locale) => (value / 100).toFixed(2) + "x"
                 valueFromText: (text, locale) => Math.round(parseFloat(text) * 100)
                 onValueModified: root.optionChanged("max_speedup", value / 100)
                 Accessible.name: "Fastest speech"
-                ToolTip.visible: hovered
-                ToolTip.text: "1.00x never speeds speech up; 1.35x is barely noticeable."
-                ToolTip.delay: 600
+                toolTipText: "1.00x never speeds speech up; 1.35x is barely noticeable."
             }
             Item { Layout.fillWidth: true }
         }

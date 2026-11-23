@@ -16,7 +16,7 @@ from collections import OrderedDict
 from typing import Any, AsyncIterator, Optional
 
 from ccgen.core import AnySegment
-from ccgen.core.tasks import Task, TaskResult, cancelled_result, create_task
+from ccgen.core.tasks import Task, TaskResult, cancelled_result, create_task, failed_result
 from ccgen.core.tasks.configs import TaskConfigBase
 from ccgen.engines import model_cache
 
@@ -153,7 +153,7 @@ class JobManager:
                 result = cancelled_result(task.config.input_path)
             else:
                 _log.error("Job %s failed: %r", job_id, e, exc_info=True)
-                result = TaskResult(success=False, input_path=task.config.input_path, error=str(e) or repr(e))
+                result = failed_result(task.config.input_path, e)
         finally:
             result = result or cancelled_result(task.config.input_path)
             self._store_result(job_id, result)
@@ -164,6 +164,8 @@ class JobManager:
                 "event": "finished",
                 "success": result.success,
                 "error": result.error,
+                "error_detail": result.error_detail,
+                "error_kind": result.error_kind,
                 "cancelled": result.cancelled,
                 "output_files": result.output_files,
                 "detected_language": result.detected_language,
@@ -198,6 +200,8 @@ class JobManager:
             output_files=result.output_files,
             detected_language=result.detected_language,
             error=result.error,
+            error_detail=result.error_detail,
+            error_kind=result.error_kind,
             cancelled=result.cancelled,
             warnings=result.warnings,
             output_languages=result.output_languages,

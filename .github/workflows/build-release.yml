@@ -99,15 +99,14 @@ jobs:
         shell: pwsh
         run: New-Item -ItemType Directory -Path build\installer -Force | Out-Null
 
-      # Bundles the Python app into dist\CC-Gen-Ultimate\ (onedir - used by both installers).
-      # scripts/bundle.ps1 holds the PyInstaller arguments shared with the local build scripts.
+      # Bundles the Python app into dist\CC-Gen-Ultimate\ (onedir - used by both installers), with
+      # the ccgen command line as a second exe sharing _internal. scripts/bundle.ps1 holds the
+      # PyInstaller arguments shared with the local build scripts.
       - name: Build PyInstaller bundle
         shell: pwsh
         run: |
           . .\scripts\bundle.ps1
-          $pyArgs = Get-PyInstallerArgs -Name "${{ steps.meta.outputs.APP_NAME }}" -Mode onedir -DistPath "dist"
-          pyinstaller @pyArgs
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
+          Invoke-OnedirBuild -Name "${{ steps.meta.outputs.APP_NAME }}" -DistPath "dist"
 
       # Runs the frozen exe with --self-test: imports every engine and lazily loaded module, loads
       # the native libraries, decodes audio, loads the speech engines' eSpeak and dictionary data,
@@ -119,6 +118,7 @@ jobs:
           . .\scripts\bundle.ps1
           $appName = "${{ steps.meta.outputs.APP_NAME }}"
           if (-not (Test-Bundle "dist\$appName\$appName.exe")) { throw "Bundle self-test failed" }
+          if (-not (Test-CliBundle "dist\$appName\ccgen.exe")) { throw "The ccgen command line doesn't run" }
       - name: Copy shell DLL into bundle
         shell: pwsh
         run: Copy-Item build\shell\ccgen_shell.dll dist\${{ steps.meta.outputs.APP_NAME }}\ -Force

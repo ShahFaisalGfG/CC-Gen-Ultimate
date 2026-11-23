@@ -140,7 +140,7 @@ class TestGetJob:
         assert events[-1]["event"] == "finished"
         assert client.get(f"/jobs/{job_id}").json() == {
             "job_id": job_id, "busy": False, "success": True,
-            "error": "", "output_files": ["out.srt"], "warnings": ["w"],
+            "error": "", "error_detail": "", "output_files": ["out.srt"], "warnings": ["w"],
         }
 
 
@@ -168,7 +168,7 @@ class TestStreamJob:
             "event": "progress", "done": 1, "total": 4, "stage": "transcribe", "step": 1, "steps": 2,
         }
         assert events[2] == {
-            "event": "finished", "success": True, "error": "", "cancelled": False,
+            "event": "finished", "success": True, "error": "", "error_detail": "", "error_kind": "", "cancelled": False,
             "output_files": ["out.srt"], "detected_language": "en", "warnings": ["No speech"],
             "output_languages": {"out.srt": "en"},
         }
@@ -315,15 +315,17 @@ class TestCancelJob:
 
     def test_failing_prepare_reports_its_error(self, client, tmp_path):
         def failing_prepare(status_cb, progress_cb):
-            raise RuntimeError("model download failed")
+            raise RuntimeError("Max retries exceeded with url: /Systran/faster-whisper-tiny")
 
         with _patched(_fake_task(prepare_side_effect=failing_prepare)):
             job_id = _start_job(client, tmp_path)
             with client.websocket_connect(f"/jobs/{job_id}/stream") as ws:
                 events = _collect_until_finished(ws)
 
+        # The error reads in plain words with the next step; the library's text is kept as the detail.
         assert events[-1]["success"] is False
-        assert events[-1]["error"] == "model download failed"
+        assert events[-1]["error"].startswith("The model couldn't be downloaded. Check the internet connection")
+        assert "Max retries exceeded" in events[-1]["error_detail"]
 
 
 class TestReleaseModels:

@@ -1,4 +1,4 @@
-# assets.py — routes to list, download, cancel, and remove Manage Models catalog assets
+# assets.py - routes to list, download, cancel, and remove Manage Models catalog assets
 
 import logging
 
@@ -31,14 +31,14 @@ async def download_asset(asset_id: str) -> dict[str, bool]:
 
 
 @router.post("/assets/{asset_id}/cancel")
-def cancel_asset(asset_id: str) -> dict[str, bool]:
-    """Cancel a queued or in-progress asset download."""
+async def cancel_asset(asset_id: str) -> dict[str, bool]:
+    """Cancel a queued or in-progress asset download (on the event loop, which owns the stream)."""
     return {"cancelled": _manager.cancel(asset_id)}
 
 
 @router.delete("/assets/{asset_id}")
 def remove_asset(asset_id: str) -> dict[str, bool]:
-    """Delete a downloaded asset from local storage."""
+    """Delete a downloaded asset from local storage; a failure's detail is one plain sentence."""
     try:
         _manager.remove(asset_id)
         return {"removed": True}

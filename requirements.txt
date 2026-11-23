@@ -1,5 +1,6 @@
 faster-whisper>=1.0.3
-av>=11
+# faster-whisper 1.2 opens media with av.open(metadata_errors=...), which PyAV 19 rejects; 17 is the newest tested.
+av>=11,<18
 argostranslate>=1.9.6
 PySide6>=6.7.0
 indic-transliteration>=2.3
@@ -24,6 +25,8 @@ llama-cpp-python==0.3.19
 # Dubbing: XTTS-v2 voice cloning (with its Japanese, Chinese, and Korean text support),
 # Kokoro and Piper stock voices.
 coqui-tts[ja,zh,ko]>=0.27.5,<0.28
+# coqui-tts imports six (TTS/tts/utils/text/punctuation.py) without listing it as a dependency.
+six>=1.16
 kokoro-onnx>=0.4.9
 piper-tts>=1.3
 pytest>=8.0

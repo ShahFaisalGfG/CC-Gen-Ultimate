@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     "faster-whisper>=1.0.3",
-    "av>=11",
+    "av>=11,<18",
     "argostranslate>=1.9.6",
     "PySide6>=6.7.0",
     "indic-transliteration>=2.3",
@@ -26,12 +26,13 @@ dependencies = [
     "psutil>=5.9",
     "llama-cpp-python>=0.3.19",
     "coqui-tts[ja,zh,ko]>=0.27.5,<0.28",
+    "six>=1.16",
     "kokoro-onnx>=0.4.9",
     "piper-tts>=1.3",
 ]
 
 [project.scripts]
-ccgen = "main:main"
+ccgen = "ccgen.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pyright>=1.1", "pyinstaller>=6.17"]

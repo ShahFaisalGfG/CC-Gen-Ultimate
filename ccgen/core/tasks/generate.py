@@ -91,7 +91,7 @@ class GenerateTask(Task[GenerateConfig]):
         if not track.cues:
             ctx.warn("No speech was found, so the subtitle files are empty.")
         ctx.status("Writing subtitle files...")
-        files = write_track(track, cfg.input_path, "", cfg.formats, self._layout, cfg.output_dir)
+        files = write_track(track, cfg.input_path, "", cfg.formats, self._layout, cfg.output_dir, cfg.existing, ctx.warn)
         return TaskResult(
             success=True, input_path=cfg.input_path, output_files=files,
             detected_language=track.language, output_languages=dict.fromkeys(files, track.language),

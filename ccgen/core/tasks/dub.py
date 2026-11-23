@@ -18,7 +18,8 @@ from ccgen.core.speakers import assign_speakers, reference_clips
 from ccgen.core.subtitle_parser import is_subtitle
 from ccgen.core.tasks.base import RunContext, Task, TaskResult, Track
 from ccgen.core.tasks.configs import DubConfig, DubStep
-from ccgen.core.tasks.outputs import output_path
+from ccgen.core.tasks.configs import EXISTING_REPLACE
+from ccgen.core.tasks.outputs import kept_message, output_path, place
 from ccgen.core.tasks.translate import load_subtitle_track
 from ccgen.engines.speech import CloningEngine, create_engine
 from ccgen.engines.speech.base import REFERENCE_RATE
@@ -45,6 +46,8 @@ class DubSettings:
     output: str
     default_track: bool
     device: str
+    # Automatic chose the engine, so falling back to another stock voice for a language is expected.
+    automatic: bool = False
 
 
 class Dubber:
@@ -54,7 +57,7 @@ class Dubber:
         self.settings = settings
         self.language = language
         self.voice, warning = resolve_voice(language, settings.mode, settings.voice, can_clone)
-        if warning:
+        if warning and not settings.automatic:
             ctx.warn(warning)
         self.engine = create_engine(self.voice, settings.device, settings.fast)
 
@@ -71,13 +74,20 @@ class Dubber:
         out_base: str,
         output_dir: Optional[str],
         ctx: RunContext,
+        existing: str = EXISTING_REPLACE,
     ) -> str:
         """Speak `track` and write the dubbed media (or a WAV file); return the written path.
 
         `media_path` is the video or audio the cue times refer to and the dub is added to (None
         when only a subtitle file was given). `reference_audio` is a separate recording to clone
-        instead of the media's own speakers.
+        instead of the media's own speakers. A dub already there is handled as `existing` says;
+        when it is kept, nothing is spoken and "" comes back.
         """
+        planned = self._final_path(media_path, out_base, output_dir)
+        final = place(planned, existing)
+        if final is None:
+            ctx.warn(kept_message(planned))
+            return ""
         speakers = self._prepare_speakers(track, media_path, reference_audio, ctx)
         directory = output_dir or os.path.dirname(os.path.abspath(out_base))
         os.makedirs(directory, exist_ok=True)
@@ -97,7 +107,7 @@ class Dubber:
             for warning in report.warnings():
                 ctx.warn(warning)
             ctx.begin("write", "Writing the dubbed file...")
-            return self._publish(wav_path, media_path, out_base, output_dir, ctx)
+            return self._publish(wav_path, media_path, final, ctx)
         finally:
             if os.path.exists(wav_path):
                 os.unlink(wav_path)
@@ -127,16 +137,18 @@ class Dubber:
         self.engine.set_speakers(references)
         return speakers
 
-    def _publish(
-        self, wav_path: str, media_path: Optional[str], out_base: str, output_dir: Optional[str], ctx: RunContext,
-    ) -> str:
-        """Move the WAV into place, or mux it into a copy of the media."""
+    def _final_path(self, media_path: Optional[str], out_base: str, output_dir: Optional[str]) -> str:
+        """Where the dub goes: movie_dub_ur.mkv (or .mka) beside the media, or a WAV file."""
         suffix = f"_dub_{self.language}"
         if self.settings.output == DubbingDefaults.OUTPUT_WAV or media_path is None:
-            final = output_path(out_base, suffix, ".wav", output_dir)
+            return output_path(out_base, suffix, ".wav", output_dir)
+        return output_path(media_path, suffix, _container_ext(media_path), output_dir)
+
+    def _publish(self, wav_path: str, media_path: Optional[str], final: str, ctx: RunContext) -> str:
+        """Move the WAV into place at `final`, or mux it into a copy of the media there."""
+        if self.settings.output == DubbingDefaults.OUTPUT_WAV or media_path is None:
             os.replace(wav_path, final)
             return final
-        final = output_path(media_path, suffix, _container_ext(media_path), output_dir)
         title = f"Dub ({self.language}, {ENGINE_LABELS[self.voice.engine]})"
         notes = attach_track(
             media_path, wav_path, final, title, self.language, self.settings.default_track, ctx.is_cancelled,
@@ -195,11 +207,14 @@ class DubTask(Task[DubConfig]):
             raise ValueError(f"{os.path.basename(cfg.text_path)} has no lines to speak.")
         for cue in self._track.cues:
             ctx.segment(cue)
-        path = self._dubber.dub(self._track, self.media_path, cfg.reference_audio, cfg.text_path, cfg.output_dir, ctx)
+        path = self._dubber.dub(
+            self._track, self.media_path, cfg.reference_audio, cfg.text_path, cfg.output_dir, ctx, cfg.existing,
+        )
         language = self._dubber.language
+        files = [path] if path else []
         return TaskResult(
-            success=True, input_path=cfg.input_path, output_files=[path], detected_language=language,
-            output_languages={path: language},
+            success=True, input_path=cfg.input_path, output_files=files, detected_language=language,
+            output_languages=dict.fromkeys(files, language),
         )
 
 
@@ -210,4 +225,5 @@ def dub_settings(cfg: Union[DubConfig, DubStep], profile: str) -> DubSettings:
     return DubSettings(
         mode=choice.mode, fast=choice.fast, voice=cfg.voice, speakers=cfg.speakers, max_speakers=cfg.max_speakers,
         max_speedup=cfg.max_speedup, output=cfg.output, default_track=cfg.default_track, device=cfg.device,
+        automatic=choice.automatic,
     )

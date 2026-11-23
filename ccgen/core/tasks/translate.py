@@ -7,7 +7,7 @@
 import logging
 import os
 
-from ccgen.config.capabilities import language_from_filename
+from ccgen.config.capabilities import language_from_filename, language_name
 from ccgen.core import Segment, TranslatedSegment
 from ccgen.core.cues import CueLayout, join_unit_text, sentence_units, spread_translation
 from ccgen.core.subtitle_parser import parse_subtitle
@@ -57,7 +57,7 @@ def translate_track(
     so they can be reviewed.
     """
     if source == target:
-        raise ValueError(f"The subtitles are already in '{target}'. Choose a different target language.")
+        raise ValueError(f"The subtitles are already in {language_name(target)}. Choose a different target language.")
     cues = track.cues
     if not cues:
         return Track(cues=[], language=target)
@@ -161,6 +161,7 @@ class TranslateTask(Task[TranslateConfig]):
         ctx.status("Writing subtitle files...")
         files = write_track(
             translated, cfg.input_path, f"_{cfg.target_lang}", cfg.formats, self._layout, cfg.output_dir,
+            cfg.existing, ctx.warn,
         )
         return TaskResult(
             success=True, input_path=cfg.input_path, output_files=files,

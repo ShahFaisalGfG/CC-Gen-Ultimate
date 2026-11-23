@@ -4,7 +4,7 @@ from typing import Annotated, Callable, Union
 
 from pydantic import Field, TypeAdapter
 
-from ccgen.core.tasks.base import CANCELLED_MESSAGE, Task, TaskResult, Track, cancelled_result
+from ccgen.core.tasks.base import CANCELLED_MESSAGE, Task, TaskResult, Track, cancelled_result, failed_result
 from ccgen.core.tasks.configs import (
     DubConfig,
     GenerateConfig,
@@ -45,5 +45,5 @@ def create_task(config: TaskConfigBase) -> Task:
 
 __all__ = [
     "CANCELLED_MESSAGE", "TASK_CONFIG", "Task", "TaskConfig", "TaskResult", "Track",
-    "cancelled_result", "create_task",
+    "cancelled_result", "create_task", "failed_result",
 ]

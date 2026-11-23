@@ -80,15 +80,14 @@ function New-VersionFile {
     return $path
 }
 
-function Get-PyInstallerArgs {
+function Get-SpecArgs {
     <#
     .SYNOPSIS
-        Returns the PyInstaller arguments for a onedir (installer) or onefile (portable) build.
+        Returns the PyInstaller options that describe the app's bundle (for pyinstaller or pyi-makespec).
     #>
     param(
         [Parameter(Mandatory)] [string]$Name,
-        [Parameter(Mandatory)] [ValidateSet("onedir", "onefile")] [string]$Mode,
-        [Parameter(Mandatory)] [string]$DistPath
+        [Parameter(Mandatory)] [ValidateSet("onedir", "onefile")] [string]$Mode
     )
     $root = Split-Path -Parent $PSScriptRoot
     return @(
@@ -105,6 +104,8 @@ function Get-PyInstallerArgs {
         # The licence texts travel with the app, as the bundled GPL components require.
         "--add-data",  "$root\LICENSE;.",
         "--add-data",  "$root\THIRD_PARTY_NOTICES.md;.",
+        # The Agent Skill, which `ccgen skill install` copies from the bundle.
+        "--add-data",  "$root\skills\ccgen;skills\ccgen",
         # Non-code data files these packages read via relative paths at runtime -
         # PyInstaller only traces Python imports, so these need to be listed explicitly.
         "--collect-data", "indic_transliteration",
@@ -128,13 +129,79 @@ function Get-PyInstallerArgs {
         "--copy-metadata", "coqui-tts",
         "--copy-metadata", "torch",
         "--copy-metadata", "torchaudio",
-        "--distpath",  $DistPath,
-        "--workpath",  "build\pyinstaller",
-        "--specpath",  ".",
-        "--noconfirm",
-        "--clean",
+        "--specpath",  $root,
         "$root\app.py"
     )
+}
+
+function Get-PyInstallerArgs {
+    <#
+    .SYNOPSIS
+        Returns the PyInstaller arguments for a one-file (portable) build. The onedir build the
+        installers use goes through Invoke-OnedirBuild, which adds the ccgen command line.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] [ValidateSet("onedir", "onefile")] [string]$Mode,
+        [Parameter(Mandatory)] [string]$DistPath
+    )
+    return @(Get-SpecArgs -Name $Name -Mode $Mode) + @(
+        "--distpath",  $DistPath,
+        "--workpath",  "build\pyinstaller",
+        "--noconfirm",
+        "--clean"
+    )
+}
+
+function Invoke-OnedirBuild {
+    <#
+    .SYNOPSIS
+        Builds the onedir bundle (dist\<Name>\) with two executables sharing _internal: the app and
+        the console command line ccgen.exe.
+    .DESCRIPTION
+        pyi-makespec writes the app's spec from Get-SpecArgs; scripts\add_cli_exe.py adds ccgen.exe
+        (main.py as a console exe) to its COLLECT; PyInstaller then builds both. The one-file
+        portable build has no ccgen: a second one-file exe would carry the whole ML stack again.
+    #>
+    param(
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] [string]$DistPath
+    )
+    $root = Split-Path -Parent $PSScriptRoot
+    $spec = Join-Path $root "$Name.spec"
+    $specArgs = Get-SpecArgs -Name $Name -Mode onedir
+    pyi-makespec @specArgs | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "pyi-makespec failed (exit $LASTEXITCODE)" }
+    $cliVersion = New-VersionFile -Exe "ccgen" -Description "$Name command line"
+    python (Join-Path $PSScriptRoot "add_cli_exe.py") $spec --script "$root\main.py" --version-file $cliVersion
+    if ($LASTEXITCODE -ne 0) { throw "Adding ccgen.exe to the spec failed (exit $LASTEXITCODE)" }
+    pyinstaller $spec --distpath $DistPath --workpath "build\pyinstaller" --noconfirm --clean | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
+}
+
+function Test-CliBundle {
+    <#
+    .SYNOPSIS
+        Runs the built ccgen.exe with --version and `skill show --json`; returns $true when both work.
+    #>
+    param([Parameter(Mandatory)] [string]$ExePath)
+    if (-not (Test-Path $ExePath)) {
+        Write-Host "   $ExePath is missing" -ForegroundColor Red
+        return $false
+    }
+    $version = & $ExePath --version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   ccgen --version failed (exit $LASTEXITCODE): $version" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "   $version"
+    $skill = & $ExePath skill show --json 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or -not $skill.Contains('"SKILL.md"')) {
+        Write-Host "   ccgen skill show failed (exit $LASTEXITCODE)" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "   ccgen skill show: the skill is bundled"
+    return $true
 }
 
 function Write-BuildInfo {

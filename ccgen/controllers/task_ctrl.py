@@ -2,37 +2,48 @@
 #
 # Every task tab (Generate, Translate, Transliterate, Dub, Workflow) owns one of these. Each file
 # in the queue runs as its own API job, one after another: start job, stream its events, record
-# the result on the file's row, move to the next file. Cancelling stops the running job and
-# leaves the remaining files pending, so Start resumes where the run stopped.
+# the result on the file's row, move to the next file. Cancelling stops the running file at its
+# next safe point and leaves it and the remaining files pending, so Start resumes where it stopped.
 #
-# Options live in one map. Whether they can run is decided by the API's own config validation
+# A tab's options and the job body for each file come from ccgen/core/jobs.py, shared with the
+# command line. Whether the options can run is decided by the API's own config validation
 # (POST /jobs/validate), so the Start button and the backend can never disagree.
+#
+# Before a run, files whose results are already there are found, and the tab asks once what to do
+# with them (replace, keep both, or skip); nothing is replaced without that answer.
 
 import os
+import time
 from typing import Any, Optional
 
 from PySide6.QtCore import Property, QObject, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWebSockets import QWebSocket
 
-from ccgen.config.defaults import OutputDefaults
-from ccgen.config.profiles import effective_profile
 from ccgen.controllers.api_client import ApiClient
-from ccgen.core.tasks.configs import SUBTITLE_FORMATS
+from ccgen.core import jobs
+from ccgen.core.errors import describe
+from ccgen.core.tasks.configs import EXISTING_CHOICES, EXISTING_KEEP_BOTH, EXISTING_SKIP, SUBTITLE_FORMATS
 from ccgen.models.file_model import (
     STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_ERROR,
     STATUS_PROCESSING,
+    STATUS_SKIPPED,
     MediaFileModel,
 )
 from ccgen.services.folder_scanner import FolderScanWorker
-from ccgen.utils.helpers import plural, to_local_path
+from ccgen.utils.helpers import duration_text, plural, to_local_path
+from ccgen.utils.model_needs import download_note, missing_models
 
 _VALIDATE_DELAY_MS = 250
+_CLOCK_MS = 1000
+# The time left is only guessed once a run has gone this long and this far.
+_ESTIMATE_AFTER_S = 15.0
+_ESTIMATE_AFTER_PROGRESS = 0.03
 
 
 class TaskController(QObject):
-    """Runs one task over a queue of files. Subclasses define the options and the job body."""
+    """Runs one task over a queue of files. Subclasses name the task; ccgen/core/jobs.py shapes it."""
 
     # Overridden by each task tab.
     task_key = ""
@@ -53,6 +64,10 @@ class TaskController(QObject):
     fileStarted       = Signal(str, str)        # (path, file name)
     notice            = Signal(str)             # one-off message shown to the user
     textLanguageChanged = Signal()
+    # Files in the run already have results: (how many, one of their names). Answer with startWith().
+    existingFound     = Signal(int, str)
+    # A run ended: (summary, files done, files failed, seconds it took, cancelled).
+    runFinished       = Signal(str, int, int, float, bool)
 
     def __init__(self, base_url: str, parent=None):
         super().__init__(parent)
@@ -67,12 +82,17 @@ class TaskController(QObject):
         self._deferred_settings: Optional[dict[str, Any]] = None
         self._saved_settings: dict[str, Any] = {}
         self._server_errors: list[str] = []
+        self._download_note = ""
         self._output_language: dict[str, str] = {}
 
         self._run_paths: list[str] = []
         self._run_index = -1
         self._run_ok = 0
         self._run_failed = 0
+        self._run_skipped = 0
+        self._existing = EXISTING_KEEP_BOTH
+        # The files a run waits to start on while the user answers existingFound.
+        self._pending_paths: list[str] = []
         self._cancel_requested = False
         self._current_path = ""
         self._stage = ""
@@ -83,6 +103,9 @@ class TaskController(QObject):
         self._step_done = 0.0
         self._summary = ""
         self._last_outputs: list[str] = []
+        self._failed: list[dict[str, str]] = []
+        self._started_at = 0.0
+        self._elapsed = 0.0
 
         self._scan: Optional[FolderScanWorker] = None
         self._scan_found = 0
@@ -91,50 +114,57 @@ class TaskController(QObject):
         self._validate_timer.setSingleShot(True)
         self._validate_timer.setInterval(_VALIDATE_DELAY_MS)
         self._validate_timer.timeout.connect(self._validate)
+        # Ticks the elapsed time while a run goes on.
+        self._clock = QTimer(self)
+        self._clock.setInterval(_CLOCK_MS)
+        self._clock.timeout.connect(self.runStateChanged)
         self._file_model.countChanged.connect(lambda _count: self._schedule_validation())
         self._file_model.inputsChanged.connect(self._schedule_validation)
         self.optionsChanged.connect(self.textLanguageChanged)
 
         self._api.get("/settings", self._on_defaults_fetched)
 
-    # ── To override per task ────────────────────────────────────────────────
+    # ── Task shape (ccgen/core/jobs.py) ──────────────────────────────────────
 
     def initial_options(self) -> dict[str, Any]:
         """Options before the saved preferences arrive."""
-        return {}
+        return self.options_from_settings({})
 
     def options_from_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         """Map saved preferences onto this task's options."""
-        return {}
+        return jobs.TAB_OPTIONS[self.task_key](settings)
+
+    def job_steps(self) -> Optional[list[dict[str, Any]]]:
+        """The workflow's steps (the Workflow tab only)."""
+        return None
 
     def job_body(self, item: dict[str, Any], validating: bool = False) -> dict[str, Any]:
-        """Build the API job body for one queued file (`item` is its row).
+        """The API job body for one queued file (`item` is its row), with the saved performance profile.
 
         Raises ValueError with a readable message when this file can't run. `validating` is
-        True when checking the options against a placeholder file, so file-specific lookups
-        should assume they will succeed.
+        True when checking the options against a placeholder file.
         """
-        raise NotImplementedError
+        return jobs.task_job(self.task_key, item, self._options, self._saved_settings, self.job_steps(), validating)
 
     def _job(self, item: dict[str, Any], validating: bool = False) -> dict[str, Any]:
-        """The job body with the saved performance profile, which resolves every Automatic choice."""
-        return {**self.job_body(item, validating), "profile": effective_profile(self._saved_settings)}
+        """The job body with this run's answer for results that are already there."""
+        return {**self.job_body(item, validating), "existing": self._existing}
 
     def add_paths(self, paths: list[str]) -> None:
         """Add files to the queue (the Dub tab pairs subtitles with their media here)."""
         self._file_model.addFiles(paths)
 
     def extra_blocker(self) -> str:
-        """A task-specific reason Start is unavailable, checked after the API's validation."""
-        return ""
+        """A licence that must be accepted before Start, checked after the API's validation."""
+        return jobs.licence_blocker(self.task_key, self._options, self._saved_settings, (), self.job_steps())
 
     def queue_blocker(self, items: list[dict[str, Any]]) -> str:
         """Why a queued file can't run with the current options, or "" when all of them can."""
-        return ""
+        return jobs.queue_blocker(self.task_key, items, self._options, self._saved_settings, self.job_steps())
 
     def needs_text_language(self) -> bool:
         """Whether every subtitle's language must be known to run with the current options."""
-        return False
+        return jobs.needs_text_language(self.task_key, self._options, self.job_steps())
 
     # ── Queue and status properties ──────────────────────────────────────────
 
@@ -206,9 +236,20 @@ class TaskController(QObject):
     @Property(float, notify=runStateChanged)
     def overallProgress(self) -> float:
         """Progress of the whole run from 0 to 1; never moves backwards between steps."""
-        if not self._run_paths:
-            return 0.0
-        return min(1.0, (max(0, self._run_index) + self._file_fraction()) / len(self._run_paths))
+        return self._overall()
+
+    @Property(str, notify=runStateChanged)
+    def timeText(self) -> str:
+        """Elapsed and estimated remaining time during a run ("4 min so far, about 6 min left"),
+        then how long the last run took."""
+        if not self._busy:
+            return f"Took {duration_text(self._elapsed)}." if self._elapsed >= 1 else ""
+        elapsed = self._seconds_running()
+        text = f"{duration_text(elapsed)} so far"
+        progress = self._overall()
+        if elapsed >= _ESTIMATE_AFTER_S and progress >= _ESTIMATE_AFTER_PROGRESS:
+            text += f", about {duration_text(elapsed * (1 - progress) / progress)} left"
+        return text
 
     @Property(str, notify=runStateChanged)
     def summary(self) -> str:
@@ -219,6 +260,16 @@ class TaskController(QObject):
     def lastOutputFolder(self) -> str:
         """Folder holding the most recently written file."""
         return os.path.dirname(self._last_outputs[-1]) if self._last_outputs else ""
+
+    @Property(list, notify=runStateChanged)
+    def lastOutputs(self) -> list:
+        """Every file the last run wrote, for "Send all results to"."""
+        return list(self._last_outputs)
+
+    @Property(list, notify=runStateChanged)
+    def failedFiles(self) -> list:
+        """The files the last run couldn't finish: [{path, name, message}]."""
+        return list(self._failed)
 
     # ── Options ──────────────────────────────────────────────────────────────
 
@@ -271,6 +322,36 @@ class TaskController(QObject):
             return f"Add a {self.file_noun} to the queue first."
         return self._server_errors[0] if self._server_errors else self.extra_blocker()
 
+    @Property(str, notify=blockerChanged)
+    def pendingLicence(self) -> str:
+        """The model whose licence Start waits for ("" when none), so the run bar can offer it."""
+        if self._scan is not None or self._file_model.count == 0:
+            return ""
+        items = self._runnable_items()
+        languages = tuple(lang for lang in (jobs.effective_language(i) or self._options.get("spoken_language", "")
+                                            for i in items) if lang)
+        return jobs.pending_licence(self.task_key, self._options, self._saved_settings, languages, self.job_steps())
+
+    @Property(str, notify=blockerChanged)
+    def downloadNote(self) -> str:
+        """What Start downloads before it works, and about how long that takes ("" when nothing)."""
+        return self._download_note
+
+    @Property(str, notify=blockerChanged)
+    def blockingPath(self) -> str:
+        """The queued subtitle whose language must be chosen before Start ("" when none)."""
+        if not self.needs_text_language():
+            return ""
+        for item in self._runnable_items():
+            if jobs.has_text(item) and not jobs.effective_language(item):
+                return str(item["path"])
+        return ""
+
+    @Property(str, notify=blockerChanged)
+    def reliesOn(self) -> str:
+        """The saved choices this tab runs with besides its own options, in a sentence ("" for none)."""
+        return jobs.relies_on(self.task_key, self._options, self._saved_settings)
+
     @Slot(str, result=str)
     def outputLanguage(self, path: str) -> str:
         """Language of the text written for a finished file ("" when unknown)."""
@@ -283,22 +364,29 @@ class TaskController(QObject):
         """Add dropped or picked files; folders among them are scanned in the background."""
         paths = [to_local_path(u) for u in urls]
         folders = [p for p in paths if p and os.path.isdir(p)]
-        files = [p for p in paths if p and p not in folders and os.path.splitext(p)[1].lower() in self.accepted_exts]
-        skipped = len(paths) - len(folders) - len(files)
+        files = [p for p in paths if p and p not in folders and jobs.ext_of(p) in self.accepted_exts]
+        skipped = [p for p in paths if p and p not in folders and p not in files]
         before = self._file_model.count
         self.add_paths(files)
         if folders:
             self._start_scan(folders)
         if skipped:
-            self.notice.emit(f"Skipped {plural(skipped, 'file')} this tab can't use.")
+            self.notice.emit(self._skipped_notice(skipped))
         elif files and self._file_model.count == before:
             self.notice.emit("Those files are already in the queue.")
+
+    def _skipped_notice(self, skipped: list[str]) -> str:
+        """Say how many files were left out, and which tab takes them when one does."""
+        text = f"Skipped {plural(len(skipped), 'file')} this tab can't use"
+        if all(jobs.ext_of(p) in jobs.SUBTITLE_EXTS for p in skipped):
+            return text + "; subtitle files go to Translate, Transliterate, or Dub."
+        return text + "."
 
     @Slot(list, str, list)
     def receiveFiles(self, paths: list, source: str, languages: list) -> None:
         """Take finished files handed over from another tab with each file's language."""
         known = dict(zip(paths, languages))
-        usable = [p for p in paths if os.path.splitext(p)[1].lower() in self.accepted_exts]
+        usable = [p for p in paths if jobs.ext_of(p) in self.accepted_exts]
         if not usable:
             self.notice.emit(f"None of those files can be used here; this tab needs a {self.file_noun}.")
             return
@@ -330,32 +418,84 @@ class TaskController(QObject):
 
     @Slot()
     def startQueue(self) -> None:
-        """Process every unfinished file in the queue (or all files when all are done)."""
+        """Process every unfinished file in the queue (or all files when all are done).
+
+        When some of them already have results, existingFound asks first; startWith() answers.
+        """
+        self._start(self._file_model.runnable_paths(), ask=True)
+
+    @Slot(str)
+    def startWith(self, existing: str) -> None:
+        """Start the run after the question about existing results: replace, keep_both, or skip."""
+        if existing in EXISTING_CHOICES:
+            paths, self._pending_paths = self._pending_paths or self._file_model.runnable_paths(), []
+            self._start(paths, ask=False, existing=existing)
+
+    @Slot()
+    def retryFailed(self) -> None:
+        """Run only the files the last run couldn't finish."""
+        self._start([f["path"] for f in self._failed if self._file_model.item(f["path"]) is not None], ask=True)
+
+    @Slot(str)
+    def retryFile(self, path: str) -> None:
+        """Run one file again."""
+        if self._file_model.item(path) is not None:
+            self._start([path], ask=True)
+
+    @Slot()
+    def cancelQueue(self) -> None:
+        """Stop the running file at its next safe point; it and the rest stay in the queue."""
+        if not self._busy or self._cancel_requested:
+            return
+        self._cancel_requested = True
+        self._set_stage("Stopping...", -1.0)
+        if self._job_id is not None:
+            self._api.post(f"/jobs/{self._job_id}/cancel")
+
+    def _start(self, paths: list[str], ask: bool, existing: str = EXISTING_KEEP_BOTH) -> None:
+        """Start a run over `paths`, first asking what to do with results already there."""
         if self._busy:
             return
         if self.blocker:
             self.notice.emit(self.blocker)
             return
-        paths = self._file_model.runnable_paths()
+        if not paths:
+            return
+        if ask:
+            clashes = self._files_with_results(paths)
+            if clashes:
+                self._pending_paths = paths
+                self.existingFound.emit(len(clashes), os.path.basename(clashes[0]))
+                return
+        self._existing = existing
         self._file_model.reset_for_run(paths)
         self._run_paths = paths
         self._run_index = -1
-        self._run_ok = self._run_failed = 0
+        self._run_ok = self._run_failed = self._run_skipped = 0
         self._cancel_requested = False
         self._summary = ""
         self._last_outputs = []
+        self._failed = []
+        self._started_at = jobs_clock()
+        self._elapsed = 0.0
         self._set_busy(True)
+        self._clock.start()
         self._start_next()
 
-    @Slot()
-    def cancelQueue(self) -> None:
-        """Stop the running file and leave the rest of the queue pending."""
-        if not self._busy or self._cancel_requested:
-            return
-        self._cancel_requested = True
-        self._set_stage("Cancelling...", -1.0)
-        if self._job_id is not None:
-            self._api.post(f"/jobs/{self._job_id}/cancel")
+    def _files_with_results(self, paths: list[str]) -> list[str]:
+        """The files among `paths` whose results (as far as they can be told) are already there."""
+        found = []
+        for path in paths:
+            item = self._file_model.item(path)
+            if item is None:
+                continue
+            try:
+                body = self._job(item)
+            except ValueError:
+                continue
+            if jobs.existing_outputs(body):
+                found.append(path)
+        return found
 
     # ── Queue runner ─────────────────────────────────────────────────────────
 
@@ -377,14 +517,20 @@ class TaskController(QObject):
             self._current_path = path
             self._job_id = None
             self._step, self._steps, self._step_done = 0, 1, 0.0
-            self._file_model.set_run_state(path, status=STATUS_PROCESSING, progress=0.0)
-            self._set_stage("Starting...", -1.0)
-            self.fileStarted.emit(path, os.path.basename(path))
             try:
                 body = self._job(item)
             except ValueError as e:
+                self._file_model.set_run_state(path, status=STATUS_PROCESSING, progress=0.0)
                 self._record_result({"success": False, "error": str(e)})
                 continue
+            if self._existing == EXISTING_SKIP and _all_there(body):
+                self._run_skipped += 1
+                self._file_model.set_run_state(path, status=STATUS_SKIPPED, progress=0.0,
+                                               message="Skipped: its results are already there.", detail="")
+                continue
+            self._file_model.set_run_state(path, status=STATUS_PROCESSING, progress=0.0)
+            self._set_stage("Starting...", -1.0)
+            self.fileStarted.emit(path, os.path.basename(path))
             self._api.post("/jobs", body, self._on_job_started)
             return
 
@@ -431,7 +577,11 @@ class TaskController(QObject):
         # The job may still be running on the server, holding the run slot the next file needs.
         if self._job_id is not None:
             self._api.post(f"/jobs/{self._job_id}/cancel")
-        self._on_file_finished({"success": False, "error": f"Lost connection to the processing service: {message}"})
+        self._on_file_finished({
+            "success": False,
+            "error": "The app lost track of this file while it was processing. Try again.",
+            "error_detail": f"Event stream: {message}",
+        })
 
     def _on_file_finished(self, event: dict[str, Any]) -> None:
         """Record one file's result and continue with the next file."""
@@ -444,32 +594,43 @@ class TaskController(QObject):
         success = bool(event.get("success"))
         outputs = [str(p) for p in event.get("output_files") or []]
         warnings = [str(w) for w in event.get("warnings") or []]
+        detail = ""
         if success:
             self._run_ok += 1
             self._last_outputs.extend(outputs)
             languages = event.get("output_languages") or {}
             for output in outputs:
                 self._output_language[_path_key(output)] = str(languages.get(output) or "")
-            status, message = STATUS_DONE, f"{plural(len(outputs), 'file')} written"
+            status = STATUS_DONE
+            message = f"{plural(len(outputs), 'file')} written" if outputs else "Nothing new written"
             if warnings:
                 message += f". Note: {warnings[0]}" + (f" (+{len(warnings) - 1} more)" if len(warnings) > 1 else "")
+                detail = "\n".join(warnings)
         elif self._cancel_requested or event.get("cancelled"):
-            status, message = STATUS_CANCELLED, "Cancelled"
+            status, message = STATUS_CANCELLED, "Stopped before it finished"
         else:
             self._run_failed += 1
-            status, message = STATUS_ERROR, str(event.get("error") or "Unknown error")
+            problem = describe(str(event.get("error") or "Unknown error"), path)
+            status, message = STATUS_ERROR, problem.message
+            detail = str(event.get("error_detail") or problem.detail or "")
+            self._failed.append({"path": path, "name": os.path.basename(path), "message": message})
         self._file_model.set_run_state(
-            path, status=status, progress=1.0 if success else 0.0, message=message, outputs=outputs,
+            path, status=status, progress=1.0 if success else 0.0, message=message, outputs=outputs, detail=detail,
         )
         self._job_id = None
 
     def _finish_run(self) -> None:
         """Wrap up the run: summary, idle state, deferred preferences, and model release."""
         cancelled = self._cancel_requested
-        summary = f"{self._run_ok} of {plural(len(self._run_paths), 'file')} done"
+        self._elapsed = self._seconds_running()
+        self._clock.stop()
+        total = len(self._run_paths)
+        summary = f"{self._run_ok} of {plural(total, 'file')} done"
         if self._run_failed:
             summary += f", {self._run_failed} failed"
-        self._summary = f"Cancelled. {summary}." if cancelled else f"{summary}."
+        if self._run_skipped:
+            summary += f", {self._run_skipped} skipped (results already there)"
+        self._summary = f"Stopped. {summary}." if cancelled else f"{summary}."
         self._current_path = ""
         self._set_stage("", -1.0)
         self._set_busy(False)
@@ -478,6 +639,7 @@ class TaskController(QObject):
             self._apply_defaults(settings)
         # The API refuses while another tab's job is still running, so models stay loaded for it.
         self._api.post("/jobs/release-models")
+        self.runFinished.emit(self._summary, self._run_ok, self._run_failed, self._elapsed, cancelled)
         self.notice.emit(self._summary)
 
     def _close_stream(self) -> None:
@@ -499,6 +661,16 @@ class TaskController(QObject):
         """How far the current file is through all of its steps, from 0 to 1."""
         return min(1.0, (self._step + self._step_done) / max(1, self._steps))
 
+    def _overall(self) -> float:
+        """How far the whole run is, from 0 to 1."""
+        if not self._run_paths:
+            return 0.0
+        return min(1.0, (max(0, self._run_index) + self._file_fraction()) / len(self._run_paths))
+
+    def _seconds_running(self) -> float:
+        """Seconds since the run started."""
+        return max(0.0, jobs_clock() - self._started_at) if self._started_at else 0.0
+
     def _set_stage(self, stage: str, progress: float) -> None:
         """Update the stage label and progress, notifying QML."""
         self._stage = stage
@@ -514,6 +686,10 @@ class TaskController(QObject):
 
     # ── Validation ───────────────────────────────────────────────────────────
 
+    def _runnable_items(self) -> list[dict[str, Any]]:
+        """The rows the next Start would run."""
+        return [i for i in map(self._file_model.item, self._file_model.runnable_paths()) if i is not None]
+
     def _schedule_validation(self) -> None:
         """Re-check the options shortly after they stop changing."""
         self.blockerChanged.emit()
@@ -521,7 +697,8 @@ class TaskController(QObject):
 
     def _validate(self) -> None:
         """Check every queued file, then ask the API whether the options can run on the first."""
-        items = [i for i in map(self._file_model.item, self._file_model.runnable_paths()) if i is not None]
+        items = self._runnable_items()
+        self._update_download_note(items)
         problem = self.queue_blocker(items)
         if problem:
             self._set_server_errors([problem])
@@ -533,6 +710,17 @@ class TaskController(QObject):
             self._set_server_errors([str(e)])
             return
         self._api.post("/jobs/validate", body, self._on_validated)
+
+    def _update_download_note(self, items: list[dict[str, Any]]) -> None:
+        """Say what Start would download first, for the files and options as they are now."""
+        note = ""
+        if items and not self._busy:
+            has_media = any(not jobs.has_text(i) for i in items)
+            note = download_note(missing_models(
+                self.task_key, self._options, self._saved_settings, has_media, self.job_steps()))
+        if note != self._download_note:
+            self._download_note = note
+            self.blockerChanged.emit()
 
     def _on_validated(self, data: Any, error: str) -> None:
         """Store the API's verdict on the current options."""
@@ -587,6 +775,7 @@ class TaskController(QObject):
         here would never leave once the event loop has stopped.
         """
         self.cancelScan()
+        self._clock.stop()
 
     # ── Defaults ─────────────────────────────────────────────────────────────
 
@@ -615,38 +804,13 @@ def _path_key(path: str) -> str:
     return os.path.normcase(os.path.normpath(path))
 
 
-def missing_language(path: str) -> str:
-    """The blocker for a subtitle whose language is neither in its name nor chosen."""
-    return f"Choose the language of {os.path.basename(path)} in the queue."
+def _all_there(body: dict[str, Any]) -> bool:
+    """True when every result a job body plans is already there (so skipping it loses nothing)."""
+    planned = jobs.planned_outputs(body)
+    return bool(planned) and all(os.path.exists(p) for p in planned)
 
 
-def subtitle_output_options() -> dict[str, Any]:
-    """Default subtitle format, layout, and folder options shared by subtitle-writing tabs."""
-    return {
-        "formats": [OutputDefaults.DEFAULT_FORMAT],
-        "max_line_length": OutputDefaults.MAX_LINE_LENGTH,
-        "max_lines": OutputDefaults.MAX_LINES,
-        "output_dir": OutputDefaults.DIRECTORY,
-    }
+def jobs_clock() -> float:
+    """The clock run times are measured with (a function so tests can replace it)."""
+    return time.monotonic()
 
-
-def subtitle_output_from_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """Saved subtitle format, layout, and folder preferences."""
-    output = settings.get("output", {})
-    defaults = subtitle_output_options()
-    return {
-        "formats": [fmt for fmt in SUBTITLE_FORMATS if output.get(fmt, fmt in defaults["formats"])],
-        "max_line_length": int(output.get("max_line_length", defaults["max_line_length"])),
-        "max_lines": int(output.get("max_lines", defaults["max_lines"])),
-        "output_dir": output.get("directory") or "",
-    }
-
-
-def subtitle_output_body(options: dict[str, Any], input_path: str) -> dict[str, Any]:
-    """Job body fields for subtitle output; files go next to their input unless a folder is set."""
-    return {
-        "output_dir": options["output_dir"] or os.path.dirname(input_path) or None,
-        "formats": list(options["formats"]),
-        "max_line_length": int(options["max_line_length"]),
-        "max_lines": int(options["max_lines"]),
-    }

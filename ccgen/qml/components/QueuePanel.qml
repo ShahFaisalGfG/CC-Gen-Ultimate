@@ -1,6 +1,5 @@
 // qmllint disable unqualified
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 
@@ -20,6 +19,7 @@ Rectangle {
 
     function openFiles() { filePicker.open() }
     function openFolder() { folderPicker.open() }
+    function showRow(path) { fileList.showRow(path) }
 
     color: Theme.surface
 
@@ -106,25 +106,45 @@ Rectangle {
                     enabled: panel.queue.count > 0
                     onClicked: queueMenu.popup(queueMenuButton, 0, queueMenuButton.height)
 
-                    Menu {
+                    AppMenu {
                         id: queueMenu
-                        MenuItem {
+                        AppMenuItem {
+                            text: "Try again failed (" + panel.queue.failedCount + ")"
+                            visible: panel.queue.failedCount > 0
+                            enabled: !panel.controller.busy
+                            onTriggered: panel.controller.retryFailed()
+                        }
+                        AppMenu {
+                            title: "Send all results to"
+                            enabled: panel.controller.lastOutputs.length > 0 && panel.sendTargets.length > 0
+                            Repeater {
+                                model: panel.sendTargets
+                                delegate: AppMenuItem {
+                                    required property var modelData
+                                    text: modelData.label
+                                    onTriggered: panel.sendRequested(modelData.key, "", panel.controller.lastOutputs)
+                                }
+                            }
+                        }
+                        AppMenuSeparator {}
+                        AppMenuItem {
                             text: "Select all"
                             onTriggered: panel.queue.selectAll()
                         }
-                        MenuItem {
+                        AppMenuItem {
                             text: "Remove selected"
                             enabled: panel.queue.selectedCount > 0
                             onTriggered: panel.queue.removeSelected()
                         }
-                        MenuItem {
+                        AppMenuItem {
                             text: "Remove finished"
                             enabled: panel.queue.doneCount > 0
                             onTriggered: panel.queue.removeFinished()
                         }
-                        MenuSeparator {}
-                        MenuItem {
+                        AppMenuSeparator {}
+                        AppMenuItem {
                             text: "Clear queue"
+                            danger: true
                             onTriggered: panel.controller.clearQueue()
                         }
                     }
@@ -135,9 +155,12 @@ Rectangle {
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
 
         FileList {
+            id: fileList
             Layout.fillWidth: true
             Layout.fillHeight: true
             fileModel: panel.queue
+            fileNoun: panel.controller.fileNoun
+            busy: panel.controller.busy
             scanning: panel.controller.scanning
             scanFound: panel.controller.scanFound
             firstRunSteps: panel.firstRunSteps
@@ -152,6 +175,9 @@ Rectangle {
             onStopScanRequested: panel.controller.cancelScan()
             onClearRequested: panel.controller.clearQueue()
             onSendRequested: (target, path, outputs) => panel.sendRequested(target, path, outputs)
+            onRetryRequested: path => panel.controller.retryFile(path)
+            onCopyRequested: text => appController.copyText(text)
+            onOpenLogRequested: appController.openLog()
             onCompanionRequested: row => {
                 companionPicker.row = row
                 // Start next to the video, where its subtitles usually are.

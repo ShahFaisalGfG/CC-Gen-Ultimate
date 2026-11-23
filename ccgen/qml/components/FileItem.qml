@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // One row of the file queue: type badge, name, size or status message, and a status badge.
-// Status is always spelled out in text and with an icon, never by color alone.
+// Status is always spelled out in text and with an icon, never by color alone. A failed row shows
+// its whole message (it says what to do next); the row grows to fit it.
 Rectangle {
     id: fileItem
 
@@ -23,6 +24,8 @@ Rectangle {
     required property string status
     required property real progress
     required property string message
+    // The original error text or the warnings of the last run, for "Copy details".
+    required property string detail
     // The subtitle a Dub tab row speaks ("" elsewhere).
     required property string companion
     // Language of the row's text known from its name or a hand-off, and the one the user picked
@@ -37,6 +40,7 @@ Rectangle {
     property bool listHasFocus: false
 
     readonly property bool _busy: fileItem.status === "processing"
+    readonly property bool _failed: fileItem.status === "error" && fileItem.message.length > 0
     readonly property bool _hasText: fileItem.kind === "subtitle" || fileItem.companion.length > 0
     readonly property string _languageLabel: {
         var known = fileItem.languageOptions.find(o => o.code === fileItem.language)
@@ -47,7 +51,8 @@ Rectangle {
         case "processing": return fileItem.progress > 0 ? Math.round(fileItem.progress * 100) + "%" : "Working"
         case "done":       return "Done"
         case "error":      return "Failed"
-        case "cancelled":  return "Cancelled"
+        case "cancelled":  return "Stopped"
+        case "skipped":    return "Skipped"
         default:           return "Waiting"
         }
     }
@@ -60,7 +65,7 @@ Rectangle {
         }
     }
 
-    implicitHeight: fileItem._hasText ? 96 : 60
+    implicitHeight: Math.max(fileItem._hasText ? 96 : 60, details.implicitHeight + 2 * Theme.spaceMd)
     radius: Theme.radius
     color: fileItem.selected ? Theme.accentSoft : (hover.hovered ? Theme.surfaceHover : "transparent")
     border.width: fileItem.current && fileItem.listHasFocus ? 2 : 0
@@ -107,7 +112,7 @@ Rectangle {
 
             Icon {
                 anchors.centerIn: parent
-                anchors.verticalCenterOffset: -4
+                anchors.verticalCenterOffset: -5
                 name: fileItem.kind === "video" ? "video" : fileItem.kind === "subtitle" ? "captions" : "audio"
                 size: 14
                 color: Theme.accent
@@ -117,19 +122,22 @@ Rectangle {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 2
                 text: fileItem.ext.length > 4 ? fileItem.ext.substring(0, 4) : fileItem.ext
+                textFormat: Text.PlainText
                 font.family: Theme.fontFamily
-                font.pixelSize: 9
+                font.pixelSize: 11
                 font.weight: Font.DemiBold
                 color: Theme.textMuted
             }
         }
 
         ColumnLayout {
+            id: details
             Layout.fillWidth: true
             spacing: 2
 
             Text {
                 Layout.fillWidth: true
+                textFormat: Text.PlainText
                 text: fileItem.name
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
@@ -139,14 +147,19 @@ Rectangle {
             }
             Text {
                 Layout.fillWidth: true
-                text: fileItem.status === "error" && fileItem.message ? fileItem.message
-                    : fileItem.status === "done" && fileItem.message ? fileItem.size + "  ·  " + fileItem.message
+                textFormat: Text.PlainText
+                text: fileItem._failed ? fileItem.message
+                    : (fileItem.status === "done" || fileItem.status === "skipped") && fileItem.message
+                        ? fileItem.size + "  ·  " + fileItem.message
                     : fileItem.companion ? "Speaks " + fileItem.companion.replace(/^.*[\\/]/, "")
                     : fileItem.size + "  ·  " + fileItem.folder
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 color: fileItem.status === "error" ? Theme.danger : Theme.textMuted
-                elide: Text.ElideMiddle
+                // A failure's message says what to do next, so it shows whole; paths are shortened.
+                wrapMode: fileItem._failed ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: fileItem._failed ? 4 : 1
+                elide: fileItem._failed ? Text.ElideRight : Text.ElideMiddle
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -190,6 +203,7 @@ Rectangle {
                 name: fileItem.status === "done" ? "completed"
                     : fileItem.status === "error" ? "error"
                     : fileItem.status === "cancelled" ? "cancel"
+                    : fileItem.status === "skipped" ? "info"
                     : fileItem._busy ? "sync" : ""
                 visible: name.length > 0
                 size: 13
@@ -197,6 +211,7 @@ Rectangle {
             }
             Text {
                 text: fileItem._statusText
+                textFormat: Text.PlainText
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontCaption
                 font.weight: fileItem._busy ? Font.DemiBold : Font.Normal

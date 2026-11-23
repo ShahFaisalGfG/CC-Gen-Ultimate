@@ -40,20 +40,25 @@ def get_log_file() -> str:
     return os.path.join(get_logs_dir(), LoggingDefaults.LOG_FILE_NAME)
 
 
-def configure_logging(enabled: bool = LoggingDefaults.ENABLE_LOGS, level: str = LoggingDefaults.DEFAULT_LOG_LEVEL) -> None:
+def configure_logging(
+    enabled: bool = LoggingDefaults.ENABLE_LOGS, level: str = LoggingDefaults.DEFAULT_LOG_LEVEL, console: bool = True,
+) -> None:
     """Apply the logging preferences: attach, retune, or detach the rotating log file.
 
     Safe to call repeatedly; the settings service calls it again whenever a logging
-    preference changes, so the new choice applies without restarting the app.
+    preference changes, so the new choice applies without restarting the app. `console` False
+    leaves the console alone (the command line keeps it for its own words).
     """
     global _file_handler
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
-    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in root.handlers):
+    has_console = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+                      for h in root.handlers)
+    if console and not has_console:
         if sys.stderr is not None:
-            console = logging.StreamHandler(sys.stderr)
-            console.setFormatter(logging.Formatter(_FORMAT, "%H:%M:%S"))
-            root.addHandler(console)
+            handler = logging.StreamHandler(sys.stderr)
+            handler.setFormatter(logging.Formatter(_FORMAT, "%H:%M:%S"))
+            root.addHandler(handler)
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
 
@@ -78,12 +83,13 @@ def configure_logging(enabled: bool = LoggingDefaults.ENABLE_LOGS, level: str = 
     _file_handler.setLevel(_LEVELS.get(level, logging.WARNING))
 
 
-def configure_from_settings(settings: dict[str, Any]) -> None:
-    """Apply the "logging" section of a settings dictionary."""
+def configure_from_settings(settings: dict[str, Any], console: bool = True) -> None:
+    """Apply the "logging" section of a settings dictionary (`console` as for configure_logging)."""
     prefs = settings.get("logging", {})
     configure_logging(
         bool(prefs.get("enable_logs", LoggingDefaults.ENABLE_LOGS)),
         str(prefs.get("log_level", LoggingDefaults.DEFAULT_LOG_LEVEL)),
+        console,
     )
 
 

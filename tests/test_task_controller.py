@@ -181,7 +181,7 @@ class TestQueue:
         controller.notice.connect(notices.append)
         controller.addFiles([str(sub)])
         assert controller.fileModel.count == 0
-        assert notices == ["Skipped 1 file this tab can't use."]
+        assert notices == ["Skipped 1 file this tab can't use; subtitle files go to Translate, Transliterate, or Dub."]
 
     def test_file_urls_are_accepted(self, controller, media):
         controller.addFiles(["file:///" + media[0].replace("\\", "/")])
@@ -395,8 +395,13 @@ class TestDubTab:
         ctrl = _make(DubController)
         (tmp_path / "movie_es.srt").write_text("")
         ctrl.addFiles([str(tmp_path / "movie_es.srt")])
-        # Automatic resolves to OmniVoice, whose licence comes first.
+        # On the Light profile Automatic speaks with Kokoro's stock voices, which need no licence.
+        assert ctrl.blocker == ""
+        assert ctrl.pendingLicence == ""
+        # On Balanced, Automatic resolves to OmniVoice, whose licence comes first.
+        ctrl._saved_settings["performance"] = {"profile": "balanced"}
         assert "OmniVoice licence" in ctrl.blocker
+        assert ctrl.pendingLicence == "omnivoice"
         ctrl.setOption("mode", "xtts")
         assert "XTTS-v2 licence" in ctrl.blocker
         ctrl.setOption("mode", "piper")
@@ -550,3 +555,72 @@ class TestDubTab:
         ctrl = _make(DubController)
         assert len(ctrl.voiceOptions("xtts", "en")) == 1
         assert any(v["code"] == "piper:ur_PK-fasih-medium" for v in ctrl.voiceOptions("piper", "ur"))
+
+
+class TestRunFlow:
+    """No silent overwrites, plain errors with details, retries, and run times."""
+
+    def test_existing_results_are_asked_about_once(self, controller, media):
+        open(media[0][:-4] + ".srt", "w").close()
+        asked = []
+        controller.existingFound.connect(lambda count, name: asked.append((count, name)))
+        controller.addFiles(media)
+        controller.startQueue()
+        assert asked == [(1, "a.mp4")] and controller._api.jobs() == []
+        controller.startWith("skip")
+        _finish(controller, "job1")
+        _finish(controller, "job2")
+        assert [b["input_path"] for b in controller._api.jobs()] == media[1:]
+        assert all(b["existing"] == "skip" for b in controller._api.jobs())
+        assert _status(controller, 0) == "skipped"
+        assert "1 skipped" in controller.summary
+
+    def test_without_clashes_new_files_never_replace_old_ones(self, controller, media):
+        controller.addFiles(media[:1])
+        controller.startQueue()
+        assert controller._api.jobs()[0]["existing"] == "keep_both"
+
+    def test_a_failed_row_reads_plainly_and_keeps_the_details(self, controller, media):
+        controller.addFiles(media[:1])
+        controller.startQueue()
+        _finish(controller, "job1", success=False, error="CUDA failed with error out of memory",
+                error_detail="RuntimeError: CUDA failed with error out of memory")
+        model = controller.fileModel
+        message = model.data(model.index(0), MediaFileModel.MessageRole)
+        assert message.startswith("The graphics card ran out of memory.")
+        assert "RuntimeError" in model.data(model.index(0), MediaFileModel.DetailRole)
+        assert [f["name"] for f in controller.failedFiles] == ["a.mp4"]
+
+    def test_try_again_failed_runs_only_those(self, controller, media):
+        controller.addFiles(media[:2])
+        controller.startQueue()
+        _finish(controller, "job1", success=False)
+        _finish(controller, "job2")
+        controller.retryFailed()
+        assert [b["input_path"] for b in controller._api.jobs()] == [media[0], media[1], media[0]]
+
+    def test_run_time_is_reported(self, controller, media, monkeypatch):
+        from ccgen.controllers import task_ctrl
+
+        clock = [1000.0]
+        monkeypatch.setattr(task_ctrl, "jobs_clock", lambda: clock[0])
+        finished = []
+        controller.runFinished.connect(lambda *args: finished.append(args))
+        controller.addFiles(media[:2])
+        controller.startQueue()
+        clock[0] += 60
+        controller._api.send("job1", {"event": "progress", "done": 1, "total": 2, "step": 0, "steps": 1})
+        assert controller.timeText == "1 min so far, about 3 min left"
+        _finish(controller, "job1")
+        clock[0] += 120
+        _finish(controller, "job2")
+        assert controller.timeText == "Took 3 min."
+        assert finished[0][1:4] == (2, 0, 180.0)
+
+    def test_the_first_download_is_named_before_start(self, controller, media, monkeypatch):
+        from ccgen.controllers import task_ctrl
+
+        monkeypatch.setattr(task_ctrl, "missing_models", lambda *args: [("Whisper small", 466_000_000)])
+        controller.addFiles(media[:1])
+        controller._validate()
+        assert controller.downloadNote.startswith("Start downloads Whisper small (466 MB) first")

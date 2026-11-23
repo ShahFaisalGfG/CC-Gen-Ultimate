@@ -1,11 +1,16 @@
 singleton Theme 1.0 Theme.qml
 AppButton 1.0 AppButton.qml
 AppDialog 1.0 AppDialog.qml
+AppMenu 1.0 AppMenu.qml
+AppMenuItem 1.0 AppMenuItem.qml
+AppMenuSeparator 1.0 AppMenuSeparator.qml
 AppSwitch 1.0 AppSwitch.qml
 AppWindow 1.0 AppWindow.qml
 Card 1.0 Card.qml
+EmptyState 1.0 EmptyState.qml
 FileItem 1.0 FileItem.qml
 FileList 1.0 FileList.qml
+FocusScroll 1.0 FocusScroll.qml
 FormatChip 1.0 FormatChip.qml
 FormRow 1.0 FormRow.qml
 Icon 1.0 Icon.qml
@@ -16,9 +21,12 @@ ResultsView 1.0 ResultsView.qml
 RunBar 1.0 RunBar.qml
 SegmentItem 1.0 SegmentItem.qml
 StyledComboBox 1.0 StyledComboBox.qml
+StyledSpinBox 1.0 StyledSpinBox.qml
+StyledTextField 1.0 StyledTextField.qml
 TitleBar 1.0 TitleBar.qml
 Toast 1.0 Toast.qml
 ModelTermsDialog 1.0 ModelTermsDialog.qml
 LicenceBanner 1.0 LicenceBanner.qml
 SpokenLanguageRow 1.0 SpokenLanguageRow.qml
 UpdateNotice 1.0 UpdateNotice.qml
+WarningNotice 1.0 WarningNotice.qml

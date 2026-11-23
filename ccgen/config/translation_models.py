@@ -8,7 +8,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from ccgen.config.defaults import AUTO, TranslationDefaults
+from ccgen.config.defaults import AUTO, LanguageOptions, TranslationDefaults
 
 ENGINE_AUTO = AUTO
 ENGINE_OPUS_MT = "opus_mt"
@@ -228,18 +228,26 @@ def route(engine: str, source: str, target: str) -> list[tuple[str, str]]:
         codes = {ENGINE_NLLB: NLLB_CODES, ENGINE_MADLAD: MADLAD_CODES, ENGINE_HYMT: HYMT_LANGUAGES}[engine]
         missing = [lang for lang in (source, target) if lang not in codes]
         if missing:
-            raise ValueError(f"{engine_info(engine).label} can't translate '{missing[0]}'.")
+            raise ValueError(f"{engine_info(engine).label} can't translate {_language(missing[0])}. "
+                             "Choose another translation model.")
         return [(source, target)]
     if engine == ENGINE_OPUS_MT:
         legs = [(source, target)] if (source, target) in OPUS_MT_LEGS or PIVOT in (source, target) \
             else [(source, PIVOT), (PIVOT, target)]
         missing_leg = next((leg for leg in legs if leg not in OPUS_MT_LEGS), None)
         if missing_leg:
-            raise ValueError(f"OPUS-MT has no model from '{missing_leg[0]}' to '{missing_leg[1]}'.")
+            raise ValueError(f"OPUS-MT has no model from {_language(missing_leg[0])} to {_language(missing_leg[1])}. "
+                             "Choose another translation model.")
         return legs
     if engine == ENGINE_ARGOS:
         return [(source, target)]
     raise ValueError(f"Unknown translation model: '{engine}'.")
+
+
+def _language(code: str) -> str:
+    """A language's name for messages ("ur" -> "Urdu"), or the code when it isn't one the app lists."""
+    names = dict((c, label) for label, c in LanguageOptions.TRANSCRIPTION if c)
+    return names.get(code, code)
 
 
 def models_for(engine: str, source: str, target: str) -> list[Ct2Model]:

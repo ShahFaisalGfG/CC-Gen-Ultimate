@@ -82,3 +82,12 @@ def tmp_wav(tmp_path):
     )
     wav_path.write_bytes(header)
     return str(wav_path)
+
+
+@pytest.fixture(autouse=True)
+def _private_workflow_store(tmp_path, monkeypatch):
+    """Keep the Workflow tab's remembered and saved workflows in the test's own folder."""
+    from ccgen.utils import workflow_presets
+
+    path = str(tmp_path / "workflows.json")
+    monkeypatch.setattr(workflow_presets, "store_path", lambda: path)

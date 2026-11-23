@@ -19,9 +19,10 @@ class TestGetOptions:
     def test_response_shape(self, client):
         data = client.get("/options").json()
         expected_keys = {
-            "models", "languages", "translation_targets",
+            "models", "languages", "translation_targets", "translation_engines",
             "translit_schemes", "translit_engines",
-            "dub_modes", "dub_languages", "voices",
+            "dub_modes", "dub_languages", "dub_qualities", "dub_speakers", "voices",
+            "devices", "compute_types", "subtitle_formats", "profiles", "licences",
         }
         assert set(data.keys()) == expected_keys
         for key in expected_keys:

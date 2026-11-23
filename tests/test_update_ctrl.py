@@ -168,10 +168,17 @@ class TestCheck:
         assert h.ctrl.status == "idle" and h.notices == [] and h.state().last_check == 0
         assert h.logs == [("Update check failed: no route", False)]
 
-    def test_a_failed_manual_check_says_why(self, harness):
+    def test_a_failed_manual_check_says_what_to_do(self, harness):
         h = harness(error="no route")
         h.ctrl.checkNow()
-        assert h.ctrl.status == "error" and h.notices == ["Couldn't check for updates: no route."]
+        # The error itself goes to the log; the notice says what to do in plain words.
+        assert h.ctrl.status == "error" and h.notices == ["Couldn't check for updates right now. Try again later."]
+        assert h.logs[-1] == ("Update check failed: no route", False)
+
+    def test_an_offline_check_says_to_check_the_connection(self, harness):
+        h = harness(error="unexpected error: ConnectionError: [Errno 11001] getaddrinfo failed")
+        h.ctrl.checkNow()
+        assert h.notices == ["Couldn't check for updates. Check your internet connection and try again."]
 
     def test_daily_check_respects_the_switch_and_the_day(self, harness):
         h = harness(latest=release("3.3.0"), auto_check=False)

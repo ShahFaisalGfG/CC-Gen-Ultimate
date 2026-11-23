@@ -4,8 +4,10 @@
 # queued file or an earlier step), and references follow their step when steps move. A
 # reference that would point at the step itself or a later one falls back to the nearest
 # earlier step that produces text, so the list is always runnable or clearly blocked.
+#
+# The steps are remembered for the next launch, and a workflow can be saved by name and loaded
+# again (ccgen/utils/workflow_presets.py, which `ccgen workflow --preset NAME` reads too).
 
-import os
 from typing import Any, Optional
 
 from PySide6.QtCore import (
@@ -15,28 +17,20 @@ from PySide6.QtCore import (
     QObject,
     QPersistentModelIndex,
     Qt,
+    QTimer,
     Signal,
     Slot,
 )
 
-from ccgen.config.defaults import DubbingDefaults, LanguageOptions, TransliterationDefaults
-from ccgen.config import licences
-from ccgen.config.voices import ENGINE_LABELS
-from ccgen.controllers.task_ctrl import TaskController, subtitle_output_body, subtitle_output_from_settings
-from ccgen.controllers.task_tabs import (
-    MEDIA_EXTS,
-    VOICE_RESETS,
-    DubController,
-    GenerateController,
-    TranslateController,
-    TransliterateController,
-    dub_model,
-    translation_models,
-)
+from ccgen.controllers.task_ctrl import TaskController
+from ccgen.core import jobs
+from ccgen.core.jobs import VOICE_RESETS, step_title
 from ccgen.core.tasks.configs import INPUT_SOURCE
-from ccgen.models.file_model import SUBTITLE_EXTS, effective_language
+from ccgen.utils import workflow_presets
 
 _UserRole = Qt.ItemDataRole.UserRole
+# The steps are remembered for the next launch this long after the last edit.
+_SAVE_DELAY_MS = 500
 
 STEP_KINDS: list[dict[str, str]] = [
     {"kind": "generate", "label": "Generate subtitles", "icon": "mic"},
@@ -44,26 +38,6 @@ STEP_KINDS: list[dict[str, str]] = [
     {"kind": "transliterate", "label": "Transliterate", "icon": "characters"},
     {"kind": "dub", "label": "Dub", "icon": "speaker"},
 ]
-_DEFAULTS = {
-    "generate": GenerateController.step_options,
-    "translate": TranslateController.step_options,
-    "transliterate": TransliterateController.step_options,
-    "dub": DubController.step_options,
-}
-_LANGUAGES = {code: label for label, code in LanguageOptions.TRANSCRIPTION + LanguageOptions.TRANSLATION_TARGETS if code}
-_SCRIPTS = {code: label for label, code in TransliterationDefaults.SCHEMES}
-
-
-def step_title(step: dict[str, Any]) -> str:
-    """Short heading for a step card, e.g. "Translate to Urdu"."""
-    kind = step["kind"]
-    if kind == "generate":
-        return "Generate subtitles"
-    if kind == "translate":
-        return f"Translate to {_LANGUAGES.get(step['target_lang'], step['target_lang'])}"
-    if kind == "transliterate":
-        return f"Transliterate to {_SCRIPTS.get(step['target_scheme'], step['target_scheme'])}"
-    return f"Dub with {ENGINE_LABELS.get(step['mode'], step['mode'])}"
 
 
 def produces_text(step: dict[str, Any]) -> bool:
@@ -200,20 +174,28 @@ class WorkflowController(TaskController):
     """Workflow tab: run the user's list of steps on every queued file."""
 
     task_key = "workflow"
-    accepted_exts = MEDIA_EXTS | SUBTITLE_EXTS
-    file_noun = "video, audio, or subtitle file"
+    accepted_exts = jobs.TASK_EXTS["workflow"]
+    file_noun = jobs.TASK_NOUNS["workflow"]
     sample_input = "example.mp4"
 
     stepsChanged = Signal()
+    presetsChanged = Signal()
 
     def __init__(self, base_url: str, parent=None):
         self._steps_model = WorkflowStepsModel()
         self._settings: dict[str, Any] = {}
-        # Until the user changes the steps, they follow the saved preferences as those load.
-        self._steps_edited = False
+        self._presets: list[str] = workflow_presets.preset_names()
+        last = workflow_presets.load_store()["last"]
+        # Until the user changes the steps, they follow the saved preferences as those load; steps
+        # remembered from the last launch count as the user's.
+        self._steps_edited = bool(last)
         super().__init__(base_url, parent)
         self._steps_model.setParent(self)
-        self._steps_model.replace(self._starter_steps())
+        self._steps_model.replace(last or self._starter_steps())
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(_SAVE_DELAY_MS)
+        self._save_timer.timeout.connect(self._remember_steps)
         self._steps_model.countChanged.connect(self.stepsChanged)
         self._steps_model.dataChanged.connect(lambda *_: self._schedule_validation())
         self._steps_model.modelReset.connect(self._schedule_validation)
@@ -231,18 +213,23 @@ class WorkflowController(TaskController):
         """Kinds of step that can be added, with labels and icons for the Add step menu."""
         return STEP_KINDS
 
+    @Property(list, notify=presetsChanged)
+    def presetNames(self) -> list:
+        """Names of the saved workflows."""
+        return list(self._presets)
+
     @Slot(str)
     def addStep(self, kind: str) -> None:
         """Append a step of `kind`, taking its input from the nearest earlier text step."""
-        if kind in _DEFAULTS:
-            self._steps_edited = True
+        if kind in jobs.STEP_OPTIONS:
+            self._edited_steps()
             self._steps_model.append(self._new_step(kind, len(self._steps_model.steps)))
 
     @Slot(int)
     def removeStep(self, row: int) -> None:
         """Remove one step."""
         if 0 <= row < len(self._steps_model.steps):
-            self._steps_edited = True
+            self._edited_steps()
             self._steps_model.remove(row)
 
     @Slot(int, int)
@@ -250,54 +237,77 @@ class WorkflowController(TaskController):
         """Move a step up or down the list."""
         count = len(self._steps_model.steps)
         if 0 <= source < count and 0 <= target < count and source != target:
-            self._steps_edited = True
+            self._edited_steps()
             self._steps_model.move(source, target)
 
     @Slot(int, str, "QVariant")
     def setStepOption(self, row: int, key: str, value: Any) -> None:
         """Change one option of one step."""
         if 0 <= row < len(self._steps_model.steps):
-            self._steps_edited = True
+            self._edited_steps()
             self._steps_model.set_option(row, key, value)
 
-    def extra_blocker(self) -> str:
-        models: list[str] = []
-        for step in self._steps_model.steps:
-            if step["kind"] == "dub":
-                models.append(dub_model(step, self._saved_settings))
-            elif step["kind"] == "translate":
-                models += sorted(translation_models(step, self._saved_settings))
-        return licences.blocker(self._saved_settings, models)
+    @Slot(str, result=bool)
+    def savePreset(self, name: str) -> bool:
+        """Save the steps as a workflow called `name` (replacing one of that name); False on failure."""
+        try:
+            saved = workflow_presets.save_preset(name, self._steps_model.steps)
+        except ValueError as error:
+            self.notice.emit(str(error))
+            return False
+        except OSError:
+            self.notice.emit("The workflow couldn't be saved. Check that the app's settings folder can be written.")
+            return False
+        self._refresh_presets()
+        self.notice.emit(f'Saved the workflow "{saved}".')
+        return True
 
-    def queue_blocker(self, items: list[dict[str, Any]]) -> str:
-        unknown = next((i for i in items if i.get("kind") == "subtitle" and not effective_language(i)), None)
-        step = self._step_reading_language()
-        if unknown is None or step is None:
-            return ""
-        number, title = step
-        return (
-            f"{os.path.basename(unknown['path'])} has no known language, which step {number} ({title}) "
-            "needs. Choose its language in the queue, or set the step's language."
-        )
+    @Slot(str)
+    def loadPreset(self, name: str) -> None:
+        """Replace the steps with a saved workflow."""
+        steps = workflow_presets.get_preset(name)
+        if steps is None:
+            self.notice.emit(f'There is no saved workflow called "{name}".')
+            self._refresh_presets()
+            return
+        self._edited_steps()
+        self._steps_model.replace(steps)
 
-    def needs_text_language(self) -> bool:
-        return self._step_reading_language() is not None
+    @Slot(str)
+    def deletePreset(self, name: str) -> None:
+        """Remove a saved workflow; the steps on the tab stay as they are."""
+        try:
+            removed = workflow_presets.delete_preset(name)
+        except OSError:
+            self.notice.emit("The workflow couldn't be removed. Check that the app's settings folder can be written.")
+            return
+        self._refresh_presets()
+        if removed:
+            self.notice.emit(f'Removed the workflow "{name}".')
 
-    def _step_reading_language(self) -> Optional[tuple[int, str]]:
-        """(number, title) of the first step that takes the queued subtitle's language, or None."""
-        for number, step in enumerate(self._steps_model.steps, start=1):
-            detects = (step["kind"] == "translate" and step["source_lang"] == "auto") \
-                or (step["kind"] == "dub" and step["language"] == DubbingDefaults.LANGUAGE_AUTO) \
-                or (step["kind"] == "transliterate" and step["source_scheme"] == TransliterationDefaults.SOURCE_AUTO)
-            if detects and step.get("input") == INPUT_SOURCE:
-                return number, step_title(step)
-        return None
+    @Slot()
+    def resetSteps(self) -> None:
+        """Start over with the starter steps: subtitles, then their translation."""
+        self._edited_steps()
+        self._steps_model.replace(self._starter_steps())
 
-    def initial_options(self) -> dict[str, Any]:
-        return subtitle_output_from_settings({})
+    def job_steps(self) -> Optional[list[dict[str, Any]]]:
+        return self._steps_model.steps
 
-    def options_from_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
-        return subtitle_output_from_settings(settings)
+    def _edited_steps(self) -> None:
+        """Note that the user changed the steps, and remember them shortly."""
+        self._steps_edited = True
+        self._save_timer.start()
+
+    def _remember_steps(self) -> None:
+        """Keep the steps for the next launch."""
+        workflow_presets.save_last(self._steps_model.steps)
+
+    def _refresh_presets(self) -> None:
+        names = workflow_presets.preset_names()
+        if names != self._presets:
+            self._presets = names
+            self.presetsChanged.emit()
 
     def _apply_defaults(self, settings: dict[str, Any]) -> None:
         """Remember the preferences for new steps, and refresh the starter steps if untouched."""
@@ -308,32 +318,15 @@ class WorkflowController(TaskController):
 
     def _starter_steps(self) -> list[dict[str, Any]]:
         """A new workflow starts as the most common chain: subtitles, then their translation."""
-        first = self._new_step("generate", 0)
-        second = self._new_step("translate", 1)
-        second["input"] = "step:0"
-        return [first, second]
+        return jobs.starter_steps(self._settings)
 
     def _new_step(self, kind: str, row: int) -> dict[str, Any]:
         """A step of `kind` with default options, reading from the nearest earlier text step."""
-        step: dict[str, Any] = {"kind": kind, **_DEFAULTS[kind](self._settings)}
-        if kind != "generate":
-            step["input"] = self._steps_model.default_input(row)
-        if kind != "dub":
-            step["write_output"] = True
-        return step
+        return jobs.new_step(kind, self._settings, self._steps_model.default_input(row))
 
-    def job_body(self, item: dict[str, Any], validating: bool = False) -> dict[str, Any]:
-        steps = []
-        for step in self._steps_model.steps:
-            body = dict(step)
-            if step["kind"] == "generate":
-                body.update(GenerateController.step_body(step))
-            steps.append(body)
-        # Steps on Automatic read the queued subtitle's language: from its name or its picker.
-        return {
-            "task": self.task_key,
-            "input_path": item["path"],
-            **subtitle_output_body(self._options, item["path"]),
-            "steps": steps,
-            "text_language": effective_language(item),
-        }
+    def shutdown(self) -> None:
+        """Remember a pending step change before the app exits."""
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._remember_steps()
+        super().shutdown()

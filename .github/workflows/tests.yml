@@ -1,0 +1,65 @@
+name: Tests
+
+# Runs on every push and pull request: the tests (Qt offscreen, every model download mocked),
+# pyright, the QML linter, and the command line's quick commands from source.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: windows-2025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          pip install -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run tests
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests -q
+
+      # pyright is in requirements.txt.
+      - name: Type-check with pyright
+        shell: pwsh
+        run: |
+          pyright ccgen/ app.py main.py server.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Lint QML
+        shell: pwsh
+        run: |
+          $files = (Get-ChildItem ccgen/qml -Recurse -Filter *.qml).FullName
+          pyside6-qmllint -I ccgen/qml -I ccgen/qml/components @files
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The command line from source: its quick commands and the skill it installs.
+      - name: Command line
+        shell: pwsh
+        run: |
+          python -m ccgen --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m ccgen skill install --dir "$env:RUNNER_TEMP\skills" --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "$env:RUNNER_TEMP\skills\ccgen\SKILL.md")) { throw "The skill wasn't installed" }
+          python -m ccgen options --json | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

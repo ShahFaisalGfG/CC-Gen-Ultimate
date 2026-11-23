@@ -74,7 +74,7 @@ class TestConfig:
             TranslateConfig(input_path=str(tmp_path / "a.srt"), target_lang="es", engine="babelfish")
 
     def test_rejects_a_pair_the_model_cannot_translate(self, tmp_path):
-        with pytest.raises(ValueError, match="OPUS-MT has no model from 'en' to 'ja'"):
+        with pytest.raises(ValueError, match="OPUS-MT has no model from English to Japanese"):
             TranslateConfig(input_path=str(tmp_path / "a.srt"), source_lang="en", target_lang="ja", engine="opus_mt")
 
     def test_automatic_is_the_default(self, tmp_path):
@@ -115,7 +115,7 @@ class TestRun:
     def test_file_already_in_target_language_fails(self, tmp_path, engine):
         cfg = TranslateConfig(input_path=_subtitle(tmp_path, "movie_es.srt"), target_lang="es")
         result = TranslateTask(cfg).run()
-        assert not result.success and "already in 'es'" in result.error
+        assert not result.success and "already in Spanish" in result.error
 
     def test_sentence_split_across_cues_is_translated_once(self, tmp_path, engine):
         body = "1\n00:00:00,000 --> 00:00:01,000\nThe quick brown\n\n2\n00:00:01,000 --> 00:00:02,000\nfox jumps.\n"
@@ -134,7 +134,9 @@ class TestRun:
         engine.ensure_model.side_effect = RuntimeError("no package")
         cfg = TranslateConfig(input_path=_subtitle(tmp_path), target_lang="es")
         result = TranslateTask(cfg).run()
-        assert not result.success and result.error == "Translation failed: no package"
+        # An error no rule explains reads plainly and points at the log; its text is the detail.
+        assert not result.success and result.error.startswith("Something went wrong. Try again")
+        assert "Translation failed: no package" in result.error_detail
 
     def test_refuses_to_overwrite_the_input(self, tmp_path, engine):
         cfg = TranslateConfig(input_path=_subtitle(tmp_path, "movie_es.srt"), source_lang="en", target_lang="es")

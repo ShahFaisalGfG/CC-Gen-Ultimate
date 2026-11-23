@@ -175,6 +175,8 @@ class OutputDefaults:
     FORMAT_LRC = False
     FORMAT_ASS = False
     FORMAT_SBV = False
+    # Every subtitle format the app writes, in the order the app lists them.
+    FORMATS = ("srt", "vtt", "lrc", "ass", "sbv")
     # Written when a request names no format at all.
     DEFAULT_FORMAT = "srt"
     # Empty means "next to each input file".
@@ -296,8 +298,9 @@ class DubbingDefaults:
     MODES: list[tuple[str, str, str]] = [
         ("Automatic (recommended)", AUTO,
          "Clones each original speaker with OmniVoice, in full quality on the Maximum quality "
-         "profile and in its fast mode otherwise, or as set in the Custom profile "
-         "(Preferences > Performance)."),
+         "profile and in its fast mode on Balanced. On the Light profile it uses Kokoro's stock voices "
+         "(Piper where Kokoro lacks the language), a small download that runs fast on any PC. The Custom "
+         "profile follows the one recommended for this PC (Preferences > Performance)."),
         ("Voice cloning (OmniVoice)", MODE_OMNIVOICE,
          "Clones each original speaker with native pronunciation in every language here, including "
          "Urdu. Best with an NVIDIA GPU and slow on a CPU; a 3.7 GB download, and its model allows "
