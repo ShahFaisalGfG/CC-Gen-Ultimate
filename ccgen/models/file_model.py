@@ -19,20 +19,32 @@ from PySide6.QtCore import (
 )
 
 from ccgen.config.capabilities import language_from_filename
+from ccgen.core.jobs import (
+    AUDIO_EXTS,
+    SUBTITLE_EXTS,
+    SUPPORTED_EXTS,
+    VIDEO_EXTS,
+    effective_language,
+    has_text,
+    kind_of,
+)
 from ccgen.utils.helpers import format_bytes
 
-_UserRole = Qt.ItemDataRole.UserRole
+__all__ = [
+    "AUDIO_EXTS", "MediaFileModel", "STATUS_CANCELLED", "STATUS_DONE", "STATUS_ERROR", "STATUS_PENDING",
+    "STATUS_PROCESSING", "STATUS_SKIPPED", "SUBTITLE_EXTS", "SUPPORTED_EXTS", "VIDEO_EXTS", "effective_language",
+    "has_text",
+]
 
-VIDEO_EXTS = frozenset({".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".ts", ".m2ts"})
-AUDIO_EXTS = frozenset({".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".wma"})
-SUBTITLE_EXTS = frozenset({".srt", ".vtt", ".lrc", ".ass", ".ssa", ".sbv"})
-SUPPORTED_EXTS = VIDEO_EXTS | AUDIO_EXTS | SUBTITLE_EXTS
+_UserRole = Qt.ItemDataRole.UserRole
 
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
 STATUS_CANCELLED = "cancelled"
+# Not run because its results were already there and the user chose to keep them.
+STATUS_SKIPPED = "skipped"
 
 
 class MediaFileModel(QAbstractListModel):
@@ -52,6 +64,8 @@ class MediaFileModel(QAbstractListModel):
     LanguageRole  = _UserRole + 12
     CompanionRole = _UserRole + 13
     ChosenLanguageRole = _UserRole + 14
+    # The original error text of a failed file (or its warnings), for "Copy details".
+    DetailRole    = _UserRole + 15
 
     countChanged      = Signal(int)
     totalSizeChanged  = Signal()
@@ -92,6 +106,7 @@ class MediaFileModel(QAbstractListModel):
             case self.LanguageRole: return item["language"]
             case self.CompanionRole: return item["companion"]
             case self.ChosenLanguageRole: return item["chosen_language"]
+            case self.DetailRole: return item["detail"]
         if role == Qt.ItemDataRole.DisplayRole:
             return item["name"]
         return None
@@ -112,6 +127,7 @@ class MediaFileModel(QAbstractListModel):
             self.LanguageRole: b"language",
             self.CompanionRole: b"companion",
             self.ChosenLanguageRole: b"chosenLanguage",
+            self.DetailRole: b"detail",
         }
 
     # ── Adding rows ──────────────────────────────────────────────────────────
@@ -222,6 +238,7 @@ class MediaFileModel(QAbstractListModel):
         progress: Optional[float] = None,
         message: Optional[str] = None,
         outputs: Optional[list[str]] = None,
+        detail: Optional[str] = None,
     ) -> None:
         """Update one file's run state by path; unknown paths (removed rows) are ignored."""
         row = self._row_of(path)
@@ -236,6 +253,8 @@ class MediaFileModel(QAbstractListModel):
             fields["message"] = message
         if outputs is not None:
             fields["outputs"] = outputs
+        if detail is not None:
+            fields["detail"] = detail
         self._update(row, **fields)
 
     @Slot(int, str)
@@ -295,7 +314,7 @@ class MediaFileModel(QAbstractListModel):
     def reset_for_run(self, paths: list[str]) -> None:
         """Mark the given files pending with cleared progress and messages."""
         for path in paths:
-            self.set_run_state(path, status=STATUS_PENDING, progress=0.0, message="", outputs=[])
+            self.set_run_state(path, status=STATUS_PENDING, progress=0.0, message="", outputs=[], detail="")
 
     # ── Query API ────────────────────────────────────────────────────────────
 
@@ -334,6 +353,11 @@ class MediaFileModel(QAbstractListModel):
         """Return a list of all file paths in the model."""
         return [f["path"] for f in self._files]
 
+    @Slot(str, result=int)
+    def rowOf(self, path: str) -> int:
+        """The row of a file in the queue, or -1."""
+        return self._row_of(path)
+
     @Slot(int, result="QVariantMap")
     def rowAt(self, row: int) -> dict:
         """The row's path, kind, outputs, and companion, for menus acting on one file."""
@@ -342,7 +366,8 @@ class MediaFileModel(QAbstractListModel):
         item = self._files[row]
         return {
             key: item[key]
-            for key in ("path", "kind", "status", "outputs", "companion", "language", "chosen_language")
+            for key in ("path", "kind", "status", "outputs", "companion", "language", "chosen_language", "message",
+                        "detail")
         }
 
     # ── Internal helpers ─────────────────────────────────────────────────────
@@ -352,7 +377,7 @@ class MediaFileModel(QAbstractListModel):
         """Build a file metadata dict for a given path."""
         name = os.path.basename(path)
         ext = os.path.splitext(name)[1].lower()
-        kind = "video" if ext in VIDEO_EXTS else "subtitle" if ext in SUBTITLE_EXTS else "audio"
+        kind = kind_of(path)
         return {
             "name": name,
             "path": path,
@@ -372,6 +397,7 @@ class MediaFileModel(QAbstractListModel):
             "chosen_language": "",
             # For dubbing: the subtitle file a media row speaks.
             "companion": "",
+            "detail": "",
         }
 
     def _insert(self, items: list[dict[str, Any]]) -> None:
@@ -442,7 +468,7 @@ class MediaFileModel(QAbstractListModel):
             "status": self.StatusRole, "progress": self.ProgressRole,
             "message": self.MessageRole, "outputs": self.OutputsRole,
             "language": self.LanguageRole, "companion": self.CompanionRole,
-            "chosen_language": self.ChosenLanguageRole,
+            "chosen_language": self.ChosenLanguageRole, "detail": self.DetailRole,
         }
         item = self._files[row]
         roles = [role_for[k] for k, v in fields.items() if item.get(k) != v]
@@ -464,12 +490,3 @@ class MediaFileModel(QAbstractListModel):
         """Rebuild the path-to-row index after rows were removed."""
         self._rows = {os.path.normcase(item["path"]): row for row, item in enumerate(self._files)}
 
-
-def has_text(item: dict[str, Any]) -> bool:
-    """True when a row carries subtitle text: a subtitle file, or media paired with one."""
-    return item.get("kind") == "subtitle" or bool(item.get("companion"))
-
-
-def effective_language(item: dict[str, Any]) -> str:
-    """The language of a row's text: the one the user picked, else the one known from its name."""
-    return str(item.get("chosen_language") or item.get("language") or "")

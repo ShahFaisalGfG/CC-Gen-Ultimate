@@ -286,9 +286,15 @@ class TestDubTask:
         assert result.output_files == [str(files / "movie_dub_es.wav")]
 
     def test_subtitle_only_input_cannot_clone_and_says_so(self, files):
-        cfg = DubConfig(input_path=str(files / "movie_es.srt"), output="wav")
+        cfg = DubConfig(input_path=str(files / "movie_es.srt"), output="wav", mode="omnivoice")
         result = self._run(cfg, FakeEngine())
         assert "has no original voice to clone, so Kokoro was used instead." in result.warnings[0]
+
+    def test_automatic_voices_fall_back_without_a_note(self, files):
+        # Automatic on Balanced picks OmniVoice; a subtitle alone has no voice to clone, which is expected.
+        cfg = DubConfig(input_path=str(files / "movie_es.srt"), output="wav", profile="balanced")
+        result = self._run(cfg, FakeEngine())
+        assert not any("was used instead" in warning for warning in result.warnings)
 
     def test_unknown_language_fails_in_prepare(self, files):
         (files / "movie.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhola\n", encoding="utf-8")

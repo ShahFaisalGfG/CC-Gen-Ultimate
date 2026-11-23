@@ -35,6 +35,52 @@ Type: files; Name: "{app}\ccgen_shell.*.old"
 #include "update_support.iss"
 
 [Code]
+#ifdef PathRoot
+// True when Folder is not already on PATH (compared without case and trailing backslashes).
+function NeedsAddPath(Folder: String): Boolean;
+var
+  Paths: String;
+begin
+  if not RegQueryStringValue({#PathRoot}, '{#PathKey}', 'Path', Paths) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  Result := Pos(';' + Uppercase(RemoveBackslashUnlessRoot(Folder)) + ';', ';' + Uppercase(Paths) + ';') = 0;
+end;
+
+// Takes the install folder back off PATH when the app is uninstalled.
+procedure RemoveFromPath(Folder: String);
+var
+  Paths, Entry, Kept: String;
+  Separator: Integer;
+begin
+  if not RegQueryStringValue({#PathRoot}, '{#PathKey}', 'Path', Paths) then
+    Exit;
+  Kept := '';
+  Paths := Paths + ';';
+  while Length(Paths) > 0 do
+  begin
+    Separator := Pos(';', Paths);
+    Entry := Copy(Paths, 1, Separator - 1);
+    Delete(Paths, 1, Separator);
+    if (Entry <> '') and (CompareText(RemoveBackslashUnlessRoot(Entry), RemoveBackslashUnlessRoot(Folder)) <> 0) then
+    begin
+      if Kept <> '' then
+        Kept := Kept + ';';
+      Kept := Kept + Entry;
+    end;
+  end;
+  RegWriteExpandStringValue({#PathRoot}, '{#PathKey}', 'Path', Kept);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemoveFromPath(ExpandConstant('{app}'));
+end;
+#endif
+
 // Explorer keeps ccgen_shell.dll loaded, so it can't be overwritten, but a loaded DLL can be
 // renamed. The old copy moves aside as ccgen_shell.<n>.old and the new one is copied as usual, so
 // a silent update never stops on a file in use; .old files nothing holds any more are deleted

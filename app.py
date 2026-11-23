@@ -18,8 +18,10 @@ from ccgen.ui.boot_thread import BootThread
 from ccgen.ui.splash_screen import SplashScreen
 from ccgen.utils.app_mutex import hold_app_mutexes
 from ccgen.utils.helpers import resource_path
+from ccgen.utils.launch import LaunchRequest, parse_arguments, plan_launch
 from ccgen.utils.logging import configure_from_settings
 from ccgen.utils.settings import load_settings
+from ccgen.utils.single_instance import SingleInstance
 
 # The controllers, API, and self-test pull in torch, CTranslate2, and transformers, which take
 # many seconds to import. They are imported where they are used: the boot thread loads them
@@ -36,13 +38,15 @@ _BUILD_INFO = "build.ini"
 class _Startup:
     """Owns the splash screen and boot thread, then builds the main window once ready."""
 
-    def __init__(self, app: QApplication) -> None:
+    def __init__(self, app: QApplication, instance: SingleInstance, launch: LaunchRequest) -> None:
         self._app = app
-        self._input_paths = [p for p in sys.argv[1:] if os.path.exists(p)]
+        self._instance = instance
+        self._launch = launch
         self._engine: Optional[QQmlApplicationEngine] = None
         self._api_server = None
         self._app_ctrl = None
-        # One TaskController per task tab, keyed by the QML context property name.
+        # One TaskController per task tab, keyed by the tab's key ("generate"); QML reaches each
+        # as "<key>Controller".
         self._task_ctrls: dict[str, Any] = {}
         self._prefs_ctrl = None
         self._assets_ctrl = None
@@ -74,7 +78,6 @@ class _Startup:
         )
         from ccgen.controllers.update_ctrl import UpdateController
         from ccgen.controllers.workflow_ctrl import WorkflowController
-        from ccgen.models.file_model import SUBTITLE_EXTS
 
         try:
             _log.info("Embedded API server ready at %s", api_server.base_url)
@@ -90,11 +93,11 @@ class _Startup:
 
             app_ctrl   = AppController()
             task_ctrls: dict[str, TaskController] = {
-                "generateController": GenerateController(api_server.base_url),
-                "translateController": TranslateController(api_server.base_url),
-                "transliterateController": TransliterateController(api_server.base_url),
-                "dubController": DubController(api_server.base_url),
-                "workflowController": WorkflowController(api_server.base_url),
+                "generate": GenerateController(api_server.base_url),
+                "translate": TranslateController(api_server.base_url),
+                "transliterate": TransliterateController(api_server.base_url),
+                "dub": DubController(api_server.base_url),
+                "workflow": WorkflowController(api_server.base_url),
             }
             prefs_ctrl = PrefsController(api_server.base_url)
             assets_ctrl = AssetsController(api_server.base_url)
@@ -102,14 +105,6 @@ class _Startup:
             update_ctrl = UpdateController(_update_config())
             update_ctrl.set_busy_sources([*task_ctrls.values(), assets_ctrl])
             prefs_ctrl.settingsChanged.connect(update_ctrl.preferencesChanged)
-            if self._input_paths:
-                # Files opened with the app (e.g. from Explorer's context menu): media gets
-                # subtitles generated, subtitle files are offered for translation.
-                task_ctrls["generateController"].addFiles(self._input_paths)
-                task_ctrls["translateController"].addFiles(
-                    [p for p in self._input_paths if os.path.splitext(p)[1].lower() in SUBTITLE_EXTS]
-                )
-                _log.info("Queued %d file(s) from command line", len(self._input_paths))
 
             engine = QQmlApplicationEngine()
             ctx = engine.rootContext()
@@ -118,8 +113,8 @@ class _Startup:
             ctx.setContextProperty("modelsController", assets_ctrl)
             ctx.setContextProperty("performanceController", performance_ctrl)
             ctx.setContextProperty("updateController", update_ctrl)
-            for name, controller in task_ctrls.items():
-                ctx.setContextProperty(name, controller)
+            for key, controller in task_ctrls.items():
+                ctx.setContextProperty(f"{key}Controller", controller)
 
             qml_dir = resource_path("ccgen/qml")
             engine.addImportPath(qml_dir)
@@ -143,15 +138,40 @@ class _Startup:
             self._splash.close()
             if isinstance(root, QQuickWindow):
                 root.show()
+                app_ctrl.attach_window(root)
                 _log.info("Window shown - %dx%d at (%d,%d)", root.width(), root.height(), root.x(), root.y())
             else:
                 _log.info("Window created (non-QQuickWindow root)")
+            # This launch's files, then those of launches made while the window loaded, then each
+            # later launch as it comes.
+            self._take_launch(self._launch)
+            self._instance.launchReceived.connect(self._on_later_launch)
+            self._instance.attach()
             # After the window shows: detection imports torch, and its result only refines choices.
             performance_ctrl.detect()
             update_ctrl.start()
         except Exception as e:
             _log.critical("Failed to build interface: %r", e, exc_info=True)
             self._on_failed(str(e))
+
+    def _take_launch(self, launch: LaunchRequest) -> None:
+        """Queue a launch's files in the tabs that take them, then show the tab (appController.openTab)."""
+        if self._app_ctrl is None:
+            return
+        accepted = {key: controller.accepted_exts for key, controller in self._task_ctrls.items()}
+        plan = plan_launch(launch, accepted)
+        for key, paths in plan.files.items():
+            self._task_ctrls[key].addFiles(list(paths))
+            _log.info("Queued %d file(s) from a launch in the %s tab", len(paths), key)
+        if plan.tab:
+            self._app_ctrl.openTab.emit(plan.tab)
+
+    def _on_later_launch(self, launch: object) -> None:
+        """Another start of the app handed over its files: bring the window forward and queue them."""
+        if self._app_ctrl is not None:
+            self._app_ctrl.bring_to_front()
+        if isinstance(launch, LaunchRequest):
+            self._take_launch(launch)
 
     def _on_failed(self, message: str) -> None:
         """Show a real error dialog and quit instead of hanging silently."""
@@ -164,6 +184,9 @@ class _Startup:
     def shutdown(self) -> None:
         """Tear down the QML scene and controllers, then stop the API server."""
         try:
+            self._instance.close()
+            if self._app_ctrl is not None:
+                self._app_ctrl.shutdown()
             if self._update_ctrl is not None:
                 self._update_ctrl.shutdown()
             for controller in self._task_ctrls.values():
@@ -265,10 +288,11 @@ def _update_config():
 
 
 def main() -> None:
-    """Initialise the Qt application, show the splash, and boot the app in the background.
+    """Hand a later launch's files to the open window, or show the splash and boot the app.
 
-    `--self-test [REPORT_PATH]` instead verifies the build can load everything it needs and
-    exits with 0 or 1 (used by the release workflow on the frozen bundle).
+    `[--tab KEY] [PATH ...]` queues files (Explorer's menu names the tab). `--self-test
+    [REPORT_PATH]` instead verifies the build can load everything it needs and exits with 0 or 1
+    (used by the release workflow on the frozen bundle).
     """
     freeze_support()
     if _SELF_TEST_FLAG in sys.argv:
@@ -277,7 +301,6 @@ def main() -> None:
         index = sys.argv.index(_SELF_TEST_FLAG)
         sys.exit(run_self_test(sys.argv[index + 1] if index + 1 < len(sys.argv) else None))
     configure_from_settings(load_settings())
-    _log.info("Starting CC-Gen-Ultimate")
 
     os.environ.setdefault("QT_QPA_PLATFORM", "windows")
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
@@ -286,12 +309,18 @@ def main() -> None:
     _log.debug("QML style set to Material")
 
     app = QApplication(sys.argv)
+    launch = parse_arguments(sys.argv[1:])
+    instance = SingleInstance()
+    if instance.try_forward(launch):
+        _log.info("Handed %d file(s) to the open CC-Gen-Ultimate window", len(launch.paths))
+        sys.exit(0)
+    _log.info("Starting CC-Gen-Ultimate")
     hold_app_mutexes()  # the installers wait while CC-Gen-Ultimate runs
     # Qt's automatic quit-on-last-window-closed can misfire the instant the
     # splash (a QWidget) closes while a QML window is the only one left open -
     # main.qml's root window quits explicitly on close instead (see main.qml).
     app.setQuitOnLastWindowClosed(False)
-    startup = _Startup(app)
+    startup = _Startup(app, instance, launch)
     code = app.exec()
     startup.shutdown()
     startup.install_update()

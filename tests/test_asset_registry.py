@@ -1,19 +1,29 @@
 # test_asset_registry.py - unit tests for ccgen.utils.asset_registry
 
+import errno
+import os
+from collections import namedtuple
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ccgen.core.errors import disk_full_message
 from ccgen.utils.asset_registry import (
     CATEGORY_TRANSLATION,
     CATEGORY_TRANSLITERATION,
     CATEGORY_VOICES,
     CATEGORY_WHISPER,
+    check_free_space,
     delete_asset,
     download_asset,
+    download_folder,
     list_assets,
+    required_bytes,
 )
 from ccgen.config.capabilities import translation_asset_ids
+
+_Usage = namedtuple("_Usage", "total used free")
+_PLENTY = _Usage(10**13, 0, 10**13)
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +31,13 @@ def _no_local_voices():
     """Report every voice as missing so catalog tests never depend on this machine's files."""
     with patch("ccgen.utils.asset_registry.voice_files.engine_files_cached", return_value=False):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _roomy_drive():
+    """Every drive has room unless a test says otherwise, so no test depends on this machine's disks."""
+    with patch("ccgen.utils.asset_registry.shutil.disk_usage", return_value=_PLENTY) as usage:
+        yield usage
 
 
 class _FakeRevision:
@@ -77,8 +94,10 @@ class TestListAssets:
         # OPUS-MT, which Automatic uses for most pairs, comes first in the tab.
         assert translation[0]["engine"] == "OPUS-MT"
         assert len(translit) == 3
-        assert {a["engine"] for a in voices} == {"OmniVoice (voice cloning)", "XTTS-v2 (voice cloning)", "Kokoro", "Piper"}
-        assert sum(a["engine"] == "Piper" for a in voices) > 50
+        assert {a["engine"] for a in voices} == {
+            "Voice cloning (OmniVoice)", "Voice cloning (XTTS-v2)", "Natural voices (Kokoro)", "Light voices (Piper)",
+        }
+        assert sum(a["engine"] == "Light voices (Piper)" for a in voices) > 50
         assert all(a["downloaded"] is False and a["size_bytes"] is None for a in assets)
 
     def test_whisper_asset_reports_approx_size_when_not_downloaded(self):
@@ -162,11 +181,26 @@ class TestListAssets:
                     assets = list_assets()
 
         by_id = {a["id"]: a for a in assets}
-        assert by_id["whisper:tiny"]["engine"] == "Faster Whisper"
+        assert by_id["whisper:tiny"]["engine"] == "Whisper"
         assert by_id["translation:en-es"]["engine"] == "Argos Translate"
-        assert by_id["transliteration:roman-ur"]["engine"] == "Neural (M2M100)"
-        assert by_id["transliteration:ur-roman"]["engine"] == "Neural (M2M100)"
-        assert by_id["transliteration:hi-ur"]["engine"] == "Neural (Rekhta)"
+        assert by_id["transliteration:roman-ur"]["engine"] == "Neural"
+        assert by_id["transliteration:ur-roman"]["engine"] == "Neural"
+        assert by_id["transliteration:hi-ur"]["engine"] == "Neural"
+
+    def test_each_asset_has_a_name_for_sentences(self):
+        with (
+            patch("ccgen.utils.asset_registry.model_status.whisper_cached", return_value=False),
+            patch("ccgen.utils.asset_registry.model_status.translation_pair_cached", return_value=False),
+            patch("ccgen.utils.asset_registry.model_status.neural_translit_cached", return_value=False),
+            patch("ccgen.utils.asset_registry.translation_files.is_ready", return_value=False),
+        ):
+            by_id = {a["id"]: a for a in list_assets()}
+        assert by_id["whisper:small"]["name"] == "Whisper small"
+        assert by_id["translation:opus_mt-en-ar"]["name"] == "OPUS-MT English → Arabic"
+        assert by_id["translation:nllb-1.3b"]["name"] == "NLLB-200 1.3B"
+        assert by_id["translation:en-es"]["name"] == "Argos Translate English → Spanish"
+        assert by_id["voices:omnivoice"]["name"] == "OmniVoice"
+        assert all(a["name"] for a in by_id.values())
 
     def test_transliteration_pair_size_includes_shared_tokenizer(self):
         cache = _fake_cache([
@@ -270,6 +304,60 @@ class TestDownloadAsset:
         with patch("ccgen.utils.asset_registry.install_pair", side_effect=RuntimeError("no package")):
             with pytest.raises(RuntimeError, match="no package"):
                 download_asset("translation:en-es")
+
+
+class TestFreeSpace:
+    def test_required_bytes_add_room_to_unpack_or_convert(self):
+        headroom = 100_000_000
+        assert required_bytes("whisper:small") == 466_000_000 + headroom
+        assert required_bytes("translation:en-es") == 2 * 92_000_000 + headroom  # Argos archive and copy
+        assert required_bytes("translation:opus_mt-en-ar") == int(456_000_000 * 1.25) + headroom
+        assert required_bytes("translation:hymt2-1.8b") == 1_080_000_000 + headroom
+        assert required_bytes("bogus:thing") == 0
+        assert required_bytes("voices:piper:nope") == 0
+
+    def test_each_kind_downloads_into_its_own_folder(self):
+        from huggingface_hub import constants
+        from ccgen.engines.speech import voice_files
+        from ccgen.engines.translation import model_files
+
+        assert download_folder("whisper:small") == constants.HF_HUB_CACHE
+        assert download_folder("transliteration:roman-ur") == constants.HF_HUB_CACHE
+        assert download_folder("voices:omnivoice") == constants.HF_HUB_CACHE
+        assert download_folder("voices:kokoro") == voice_files.voices_root()
+        assert download_folder("translation:hymt2-1.8b") == model_files.model_folder("hymt2-1.8b")
+        assert "argos" in download_folder("translation:en-es").lower()
+        with pytest.raises(ValueError):
+            download_folder("bogus:thing")
+
+    def test_a_drive_with_room_passes(self, _roomy_drive):
+        assert check_free_space("whisper:large-v3") is None
+        _roomy_drive.assert_called_once()
+
+    def test_a_full_drive_raises_enospc_with_the_size_and_folder(self, _roomy_drive):
+        _roomy_drive.return_value = _Usage(10**12, 10**12 - 200_000_000, 200_000_000)
+        with pytest.raises(OSError) as raised:
+            check_free_space("whisper:small")
+        assert raised.value.errno == errno.ENOSPC
+        folder = os.path.normpath(download_folder("whisper:small"))
+        assert raised.value.strerror == disk_full_message(required_bytes("whisper:small"), folder, other_folder=False)
+        assert "566 MB" in str(raised.value.strerror)
+
+    def test_unknown_sizes_and_unreadable_drives_never_block(self, _roomy_drive):
+        _roomy_drive.side_effect = OSError("no such drive")
+        assert check_free_space("whisper:small") is None
+        _roomy_drive.reset_mock(side_effect=True)
+        assert check_free_space("bogus:thing") is None
+        _roomy_drive.assert_not_called()
+
+    def test_a_download_stops_before_it_starts_on_a_full_drive(self, _roomy_drive):
+        _roomy_drive.return_value = _Usage(10**12, 10**12, 0)
+        messages = []
+        with patch("ccgen.utils.asset_registry.install_pair") as install:
+            with pytest.raises(RuntimeError, match="The drive for .* is full"):
+                download_asset("translation:en-es", progress_cb=messages.append)
+        install.assert_not_called()
+        assert messages == []
 
 
 class TestDeleteAsset:

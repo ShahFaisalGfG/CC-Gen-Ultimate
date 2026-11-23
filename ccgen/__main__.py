@@ -1,4 +1,7 @@
-# __main__.py — enables `python -m ccgen` invocation
-from main import main
+# __main__.py - `python -m ccgen ...` runs the command line (ccgen/cli.py)
 
-main()
+import sys
+
+from ccgen.cli import main
+
+sys.exit(main())

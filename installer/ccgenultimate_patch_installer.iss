@@ -71,14 +71,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 ; Keep in step with APP_LAYER_* in scripts\runtime_id.py.
 Source: "{#SourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\ccgen.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\build.ini"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\_internal\ccgen\*"; DestDir: "{app}\_internal\ccgen"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\_internal\skills\*"; DestDir: "{app}\_internal\skills"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\_internal\LICENSE"; DestDir: "{app}\_internal"; Flags: ignoreversion
 Source: "{#SourceDir}\_internal\THIRD_PARTY_NOTICES.md"; DestDir: "{app}\_internal"; Flags: ignoreversion
 
 [InstallDelete]
 ; The app's QML and assets are replaced as a whole, so files this version no longer ships go.
 Type: filesandordirs; Name: "{app}\_internal\ccgen"
+Type: filesandordirs; Name: "{app}\_internal\skills"
 
 [Registry]
 ; The version the system installer records for all users

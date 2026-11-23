@@ -38,7 +38,15 @@ AppWindow {
     ]
 
     Component.onCompleted: prefsWin.loadValues()
-    onClosing: prefsWin.destroy()
+    // Esc, Cancel, and the title bar's close button all come here: unsaved edits ask first.
+    onClosing: close => {
+        if (prefsWin.dirty) {
+            close.accepted = false
+            unsavedDialog.open()
+            return
+        }
+        prefsWin.destroy()
+    }
 
     Connections {
         target: prefsController
@@ -180,6 +188,35 @@ AppWindow {
             prefsController.resetDefaults()
             appController.applyTheme("system")
             resetDialog.close()
+        }
+    }
+
+    // Asked when the window closes with unsaved edits. Esc or "Keep editing" goes back to them.
+    AppDialog {
+        id: unsavedDialog
+        title: "Save your changes?"
+        standardButtons: Dialog.Save | Dialog.Discard | Dialog.Cancel
+        defaultButton: Dialog.Save
+        onAboutToShow: {
+            var discard = unsavedDialog.standardButton(Dialog.Discard)
+            if (discard) discard.text = "Don't save"
+            var cancel = unsavedDialog.standardButton(Dialog.Cancel)
+            if (cancel) cancel.text = "Keep editing"
+        }
+        Text {
+            width: 340
+            textFormat: Text.PlainText
+            text: "You changed some preferences. Save them before closing, or close without them."
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            color: Theme.text
+        }
+        onAccepted: prefsWin.save()
+        onDiscarded: {
+            unsavedDialog.close()
+            prefsWin.dirty = false
+            prefsWin.close()
         }
     }
 
@@ -513,8 +550,8 @@ AppWindow {
                                 id: translitSourceCombo
                                 Layout.fillWidth: true
                                 accessibleName: "Default source script"
-                                toolTipText: "Script the subtitles are written in."
-                                model: prefsController.translitSchemeOptions
+                                toolTipText: "Script the subtitles are written in. Automatic uses the script of each subtitle's language."
+                                model: prefsController.translitSourceOptions
                                 onActivated: prefsWin.set("transliteration.source", currentValue)
                             }
                         }
@@ -579,19 +616,16 @@ AppWindow {
                         FormRow {
                             label: "Fastest speech"
                             hint: "Lines that don't fit their time are spoken faster up to this speed, then may run up to a second over; only longer ones are cut short."
-                            SpinBox {
+                            StyledSpinBox {
                                 id: speedupSpin
                                 from: Math.round(prefsController.speedupRange[0] * 100)
                                 to: Math.round(prefsController.speedupRange[1] * 100)
                                 stepSize: 5
-                                editable: true
                                 textFromValue: (value, locale) => (value / 100).toFixed(2) + "x"
                                 valueFromText: (text, locale) => Math.round(parseFloat(text) * 100)
                                 onValueModified: prefsWin.set("dubbing.max_speedup", value / 100)
                                 Accessible.name: "Fastest speech"
-                                ToolTip.visible: hovered
-                                ToolTip.text: "1.00x never speeds speech up; 1.35x is barely noticeable."
-                                ToolTip.delay: 600
+                                toolTipText: "1.00x never speeds speech up; 1.35x is barely noticeable."
                             }
                             Item { Layout.fillWidth: true }
                         }
@@ -658,30 +692,25 @@ AppWindow {
                         FormRow {
                             label: "Characters per line"
                             hint: "42 is the broadcast standard."
-                            SpinBox {
+                            StyledSpinBox {
                                 id: lineLengthSpin
                                 from: prefsController.lineLengthRange[0]
                                 to: prefsController.lineLengthRange[1]
-                                editable: true
                                 onValueModified: prefsWin.set("output.max_line_length", value)
                                 Accessible.name: "Characters per line"
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Longest line a subtitle may have before it wraps."
-                                ToolTip.delay: 600
+                                toolTipText: "Longest line a subtitle may have before it wraps."
                             }
                             Item { Layout.fillWidth: true }
                         }
                         FormRow {
                             label: "Lines per subtitle"
-                            SpinBox {
+                            StyledSpinBox {
                                 id: maxLinesSpin
                                 from: prefsController.maxLinesRange[0]
                                 to: prefsController.maxLinesRange[1]
                                 onValueModified: prefsWin.set("output.max_lines", value)
                                 Accessible.name: "Lines per subtitle"
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Most lines shown on screen at once. Longer speech is split into more subtitles."
-                                ToolTip.delay: 600
+                                toolTipText: "Most lines shown on screen at once. Longer speech is split into more subtitles."
                             }
                             Item { Layout.fillWidth: true }
                         }
@@ -877,7 +906,7 @@ AppWindow {
             }
             AppButton {
                 text: "Cancel"
-                toolTipText: "Close without saving (Esc)"
+                toolTipText: "Close without saving (Esc). If you changed something, you're asked first."
                 onClicked: prefsWin.close()
             }
             AppButton {
@@ -889,19 +918,26 @@ AppWindow {
         }
     }
 
-    // A scrollable column of cards for one preferences section.
-    component Page: ScrollView {
+    // A scrollable column of cards for one preferences section. A Flickable whose bar draws over
+    // the cards' margin, not a ScrollView, so the cards' width never depends on whether the bar
+    // shows; FocusScroll scrolls to the control Tab moves to.
+    component Page: Flickable {
         id: page
         default property alias cards: column.data
-        contentWidth: availableWidth
+        contentWidth: width
         contentHeight: column.implicitHeight + 2 * Theme.spaceLg
         clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+        FocusScroll { flickable: page }
+
+        // Capped in a wide window, so labels and their controls stay close.
         ColumnLayout {
             id: column
             x: Theme.spaceXl
             y: Theme.spaceLg
-            width: page.availableWidth - 2 * Theme.spaceXl
+            width: Math.min(page.width - 2 * Theme.spaceXl, 760)
             spacing: Theme.spaceLg
         }
     }

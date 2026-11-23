@@ -4,7 +4,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // A notice that the chosen (or automatically chosen) model's licence must be accepted once,
-// with a button that opens the licence. Hidden while `model` is "".
+// with a button that opens the licence. Hidden while `model` is "". Accepting is announced to
+// screen readers, since the notice then disappears with the button that had focus.
 Rectangle {
     id: banner
 
@@ -22,6 +23,7 @@ Rectangle {
         id: termsDialog
         parent: Overlay.overlay
         model: banner.model || "omnivoice"
+        onAccepted: message.Accessible.announce(termsDialog.terms.title + " accepted.")
     }
 
     RowLayout {
@@ -30,12 +32,16 @@ Rectangle {
         anchors.margins: Theme.spaceMd
         spacing: Theme.spaceMd
         Text {
+            id: message
             Layout.fillWidth: true
+            textFormat: Text.PlainText
             text: (banner.terms.title || "This model's licence") + " allows non-commercial use only. Review and accept it once to continue."
             wrapMode: Text.WordWrap
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontCaption
             color: Theme.text
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
         }
         AppButton {
             text: "Review licence"

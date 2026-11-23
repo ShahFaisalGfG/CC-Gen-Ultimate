@@ -27,24 +27,33 @@ from ccgen.config.defaults import (
 )
 from ccgen.core.subtitle_parser import is_subtitle
 
-SUBTITLE_FORMATS = ("srt", "vtt", "lrc", "ass", "sbv")
+SUBTITLE_FORMATS = OutputDefaults.FORMATS
+# What to do with an output file that is already there (see ccgen/core/tasks/outputs.py place()).
+EXISTING_REPLACE = "replace"
+EXISTING_KEEP_BOTH = "keep_both"
+EXISTING_SKIP = "skip"
+EXISTING_CHOICES = (EXISTING_REPLACE, EXISTING_KEEP_BOTH, EXISTING_SKIP)
 
 
 @dataclass(kw_only=True)
 class TaskConfigBase:
-    """Fields every task needs: the file to process, where to write results, and the
-    performance profile that resolves every "auto" model choice (see ccgen/config/profiles.py).
+    """Fields every task needs: the file to process, where to write results, what to do with an
+    output that is already there, and the performance profile that resolves every "auto" model
+    choice (see ccgen/config/profiles.py).
     """
 
     input_path: str
     output_dir: Optional[str] = None
     profile: str = ProfileDefaults.DEFAULT_PROFILE
+    existing: str = EXISTING_REPLACE
 
     def __post_init__(self) -> None:
         if not self.input_path.strip():
             raise ValueError("An input file is required.")
         if self.profile and self.profile not in profiles.PROFILE_KEYS:
             raise ValueError(f"Unknown performance profile: {self.profile}.")
+        if self.existing not in EXISTING_CHOICES:
+            raise ValueError(f"Unknown choice for files that already exist: {self.existing}.")
 
 
 @dataclass(kw_only=True)
@@ -208,7 +217,9 @@ class TransliterateStep:
     """Workflow step: convert the text of an earlier step to another script.
 
     `source_scheme` "auto" uses the script of the input's language (for example the language a
-    generate step detected), so its pair is only checked at run time.
+    generate step detected), so its pair is only checked at run time. `alternate_target` is the
+    script to convert to instead when that text turns out to be in `target_scheme` already (the
+    Transliterate tab's Roman to Urdu pair turns Urdu speech into Roman); "" fails instead.
     """
 
     kind: Literal["transliterate"] = "transliterate"
@@ -217,10 +228,13 @@ class TransliterateStep:
     source_scheme: str = TransliterationDefaults.DEFAULT_SOURCE
     target_scheme: str = TransliterationDefaults.DEFAULT_TARGET
     engine: str = TransliterationDefaults.DEFAULT_ENGINE
+    alternate_target: str = ""
 
     def __post_init__(self) -> None:
         if self.source_scheme == TransliterationDefaults.SOURCE_AUTO:
             validate_transliteration_target(self.engine, self.target_scheme)
+            if self.alternate_target:
+                validate_transliteration_target(self.engine, self.alternate_target)
         else:
             validate_transliterate(self.engine, self.source_scheme, self.target_scheme)
 

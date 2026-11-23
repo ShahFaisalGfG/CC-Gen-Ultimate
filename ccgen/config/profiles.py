@@ -144,10 +144,12 @@ def transliteration_engine(choice: str, profile: str, source: str, target: str) 
 
 @dataclass(frozen=True)
 class DubChoice:
-    """The dubbing engine and whether it runs in its faster mode."""
+    """The dubbing engine, whether it runs in its faster mode, and whether Automatic picked it (then
+    a fallback to another stock voice for a language it doesn't speak is expected, not news)."""
 
     mode: str
     fast: bool
+    automatic: bool = False
 
 
 def translation_engines(choice: str, profile: str, source: str, target: str, sources: tuple[str, ...] = ()) -> set[str]:
@@ -163,13 +165,21 @@ def translation_engines(choice: str, profile: str, source: str, target: str, sou
 
 def dub_engine(choice: str, profile: str, quality: str = AUTO) -> DubChoice:
     """The dubbing mode for a mode setting, and whether it runs fast: as `quality` says, or with
-    "auto" fast except on Maximum quality."""
+    "auto" fast except on Maximum quality.
+
+    Automatic clones voices with OmniVoice, except on the Light profile: there a first dub would
+    mean a 3.7 GB download and slow speech on most PCs, so it uses Kokoro's stock voices (Piper for
+    the languages Kokoro doesn't speak), which are small, fast, and free for any use.
+    """
     if quality == AUTO:
         fast = normalize(profile) != PROFILE_QUALITY
     else:
         fast = quality == DubbingDefaults.QUALITY_FAST
-    mode = DubbingDefaults.MODE_OMNIVOICE if choice == AUTO else choice
-    return DubChoice(mode, fast)
+    if choice != AUTO:
+        return DubChoice(choice, fast)
+    if normalize(profile) == PROFILE_LIGHT:
+        return DubChoice(DubbingDefaults.MODE_KOKORO, fast, automatic=True)
+    return DubChoice(DubbingDefaults.MODE_OMNIVOICE, fast, automatic=True)
 
 
 def describe(profile: str) -> list[tuple[str, str]]:
@@ -177,10 +187,11 @@ def describe(profile: str) -> list[tuple[str, str]]:
     profile = normalize(profile)
     translit = "neural where available" if profile != PROFILE_LIGHT else "rule-based"
     speed = "full quality" if profile == PROFILE_QUALITY else "fast mode"
+    dubbing = "Kokoro and Piper stock voices" if profile == PROFILE_LIGHT else f"OmniVoice voice cloning, {speed}"
     return [
         ("Subtitle generation", f"Whisper {WHISPER_MODELS[profile]}"),
         ("Translation", "OPUS-MT, with Hy-MT2 into Japanese, Korean, and Chinese and from Japanese and Korean"),
         ("Transliteration", translit.capitalize()),
-        ("Dubbing", f"OmniVoice voice cloning, {speed}"),
+        ("Dubbing", dubbing),
     ]
 

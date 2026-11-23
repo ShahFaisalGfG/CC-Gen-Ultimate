@@ -1,4 +1,4 @@
-# asset_manager.py — single-worker download queue for Manage Models assets; runs
+# asset_manager.py - single-worker download queue for Manage Models assets; runs
 # asset_registry's blocking download/delete off the event loop and fans out progress
 # events to WebSocket subscribers.
 #
@@ -6,16 +6,33 @@
 # usage predictable and progress state simple. A download already in flight can also be
 # cancelled: none of the underlying libraries expose an abort hook directly, so cancelling
 # sets an Event that asset_registry's progress callback checks on the next reported chunk,
-# unwinding the blocking call from the inside instead.
+# unwinding the blocking call from the inside instead. Failures reach the stream and the
+# remove route as one plain sentence (ccgen.core.errors); the original text goes to the log.
 
 import asyncio
 import logging
 import threading
 from typing import Any, AsyncIterator, Callable, Optional
 
+from ccgen.core import errors
 from ccgen.utils import asset_registry
 
 _log = logging.getLogger(__name__)
+
+# The "finished" error of a download stopped by Cancel.
+CANCELLED = "Cancelled"
+# What a failure nothing else explains says, pointing at the log Preferences > Advanced opens. The
+# app puts "Couldn't remove <model>." before the removal sentence.
+_DOWNLOAD_FAILED = ("The download stopped with an unexpected error. Try again; if it happens again, "
+                    "open the logs folder from Preferences > Advanced.")
+_REMOVE_FAILED = ("Close any task that uses the model, then try again. If it happens again, open the logs "
+                  "folder from Preferences > Advanced.")
+
+
+def plain_error(error: BaseException, fallback: str) -> str:
+    """One plain sentence with a next step for a failed download or removal (`fallback` when unknown)."""
+    problem = errors.describe(error)
+    return fallback if problem.kind == errors.KIND_UNKNOWN else problem.message
 
 
 class AssetManager:
@@ -50,9 +67,15 @@ class AssetManager:
             self._worker_task = asyncio.create_task(self._run_worker())
 
     def cancel(self, asset_id: str) -> bool:
-        """Cancel a queued or in-progress download. Returns False if the asset isn't tracked."""
+        """Cancel a queued or in-progress download. Returns False if the asset isn't tracked.
+
+        Call it on the event loop. A queued download is dropped at once and reported finished
+        (cancelled) here, since the worker never reaches it; one in progress reports that itself
+        once it unwinds.
+        """
         if asset_id in self._pending:
             self._pending.discard(asset_id)
+            self._events.put_nowait({"event": "finished", "id": asset_id, "success": False, "error": CANCELLED})
             return True
         if asset_id == self._active and self._active_cancel_event is not None:
             self._active_cancel_event.set()
@@ -60,8 +83,11 @@ class AssetManager:
         return False
 
     def remove(self, asset_id: str) -> None:
-        """Delete a downloaded asset synchronously."""
-        asset_registry.delete_asset(asset_id)
+        """Delete a downloaded asset synchronously; raises RuntimeError with a plain sentence on failure."""
+        try:
+            asset_registry.delete_asset(asset_id)
+        except Exception as e:
+            raise RuntimeError(plain_error(e, _REMOVE_FAILED)) from e
 
     def list_assets(self) -> list[asset_registry.AssetInfo]:
         """Return the current catalog snapshot."""
@@ -117,7 +143,8 @@ class AssetManager:
             emit({"event": "finished", "id": asset_id, "success": True, "error": ""})
         except Exception as e:
             if cancel_event.is_set():
-                emit({"event": "finished", "id": asset_id, "success": False, "error": "Cancelled"})
+                emit({"event": "finished", "id": asset_id, "success": False, "error": CANCELLED})
             else:
                 _log.error("Asset download failed (%s): %r", asset_id, e, exc_info=True)
-                emit({"event": "finished", "id": asset_id, "success": False, "error": str(e)})
+                emit({"event": "finished", "id": asset_id, "success": False,
+                      "error": plain_error(e, _DOWNLOAD_FAILED)})

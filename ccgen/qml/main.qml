@@ -13,8 +13,8 @@ AppWindow {
 
     width: 1180
     height: 760
-    minimumWidth: 900
-    minimumHeight: 580
+    minimumWidth: 820
+    minimumHeight: 560
     visible: true
     title: appController.appName + " " + appController.appVersion
 
@@ -32,10 +32,36 @@ AppWindow {
     ]
     readonly property var currentPage: pages.children[tabs.currentIndex]
     readonly property var currentController: mainWin.tasks[tabs.currentIndex].controller
+    // The tabs running a queue now, and the first of them (its progress goes on the taskbar).
+    readonly property var busyTasks: mainWin.tasks.filter(t => t.controller.busy)
+    readonly property var busyController: mainWin.busyTasks.length > 0 ? mainWin.busyTasks[0].controller : null
+    readonly property real taskbarProgress: mainWin.busyController ? mainWin.busyController.overallProgress : -1
+    property bool _closeConfirmed: false
 
     // quitOnLastWindowClosed is disabled app-wide (see app.py) since it can misfire while a
-    // QML window is still open, so closing the main window quits explicitly.
-    onClosing: Qt.quit()
+    // QML window is still open, so closing the main window quits explicitly. While files are
+    // processing it asks first, since closing stops them.
+    onClosing: function(close) {
+        if (mainWin.busyTasks.length > 0 && !mainWin._closeConfirmed) {
+            close.accepted = false
+            stopDialog.closing = true
+            stopDialog.open()
+            return
+        }
+        Qt.quit()
+    }
+
+    onTaskbarProgressChanged: {
+        if (mainWin.taskbarProgress < 0) appController.setTaskbarProgress(0, "none")
+        else appController.setTaskbarProgress(mainWin.taskbarProgress, "normal")
+    }
+
+    // What stops: every running tab when closing, else the current one.
+    function _stopSummary(all) {
+        var running = all ? mainWin.busyTasks : mainWin.tasks.filter(t => t.controller === mainWin.currentController)
+        return running.map(t => t.label + " (file " + t.controller.runPosition + " of " + t.controller.runTotal + ")")
+            .join(", ")
+    }
 
     titleActions: [
         AppButton {
@@ -73,7 +99,10 @@ AppWindow {
             var comp = Qt.createComponent("PreferencesWindow.qml")
             if (comp.status !== Component.Ready) { console.error(comp.errorString()); return }
             mainWin._prefsWindow = comp.createObject(mainWin)
-            mainWin._prefsWindow.closing.connect(function() { mainWin._prefsWindow = null })
+            // Dropped once hidden: Preferences can cancel its close to ask about unsaved edits.
+            mainWin._prefsWindow.visibleChanged.connect(function() {
+                if (mainWin._prefsWindow && !mainWin._prefsWindow.visible) mainWin._prefsWindow = null
+            })
         }
         mainWin._prefsWindow.show()
         mainWin._prefsWindow.raise()
@@ -85,7 +114,9 @@ AppWindow {
             var comp = Qt.createComponent("ManageModelsWindow.qml")
             if (comp.status !== Component.Ready) { console.error(comp.errorString()); return }
             mainWin._modelsWindow = comp.createObject(mainWin)
-            mainWin._modelsWindow.closing.connect(function() { mainWin._modelsWindow = null })
+            mainWin._modelsWindow.visibleChanged.connect(function() {
+                if (mainWin._modelsWindow && !mainWin._modelsWindow.visible) mainWin._modelsWindow = null
+            })
         }
         mainWin._modelsWindow.show()
         mainWin._modelsWindow.raise()
@@ -111,7 +142,11 @@ AppWindow {
     Shortcut { sequences: [StandardKey.Open]; onActivated: mainWin.currentPage.openFiles() }
     Shortcut { sequence: "Ctrl+Shift+O"; onActivated: mainWin.currentPage.openFolder() }
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter", "F5"]; onActivated: mainWin.currentController.startQueue() }
-    Shortcut { sequence: "Escape"; enabled: mainWin.currentController.busy; onActivated: mainWin.currentController.cancelQueue() }
+    Shortcut {
+        sequence: "Escape"
+        enabled: mainWin.currentController.busy
+        onActivated: { stopDialog.closing = false; stopDialog.open() }
+    }
     Shortcut { sequence: "Ctrl+,"; onActivated: mainWin.openPreferences() }
     Shortcut { sequence: "Ctrl+M"; onActivated: mainWin.openModels() }
     Shortcut { sequence: "F1"; onActivated: aboutDialog.open() }
@@ -121,6 +156,30 @@ AppWindow {
             required property int index
             sequence: "Ctrl+" + (index + 1)
             onActivated: tabs.currentIndex = index
+        }
+    }
+
+    // Notices from the shell actions (a file that moved), and the tab Explorer's menu opened files in.
+    Connections {
+        target: appController
+        function onNotice(message) { toast.show(message) }
+        function onOpenTab(key) {
+            var index = mainWin.tasks.findIndex(t => t.key === key)
+            if (index >= 0) tabs.currentIndex = index
+        }
+    }
+
+    // A long run that ends while the window is in the background says so in a notification.
+    Instantiator {
+        model: mainWin.tasks
+        delegate: Connections {
+            required property var modelData
+            target: modelData.controller
+            function onRunFinished(summary, done, failed, seconds, cancelled) {
+                if (!cancelled && seconds >= 60)
+                    appController.notify(modelData.label + (failed > 0 ? " finished with failures" : " finished"), summary)
+                if (failed > 0) appController.setTaskbarProgress(1, "error")
+            }
         }
     }
 
@@ -223,6 +282,7 @@ AppWindow {
                 emptyResultsText: "Subtitles appear here as each file is transcribed."
                 onSendRequested: (target, path, outputs) => mainWin.sendFiles("generate", target, path, outputs)
                 onNotice: message => toast.show(message)
+                onPreferencesRequested: mainWin.openPreferences()
 
                 GenerateSettings {
                     Layout.fillWidth: true
@@ -249,6 +309,7 @@ AppWindow {
                 emptyResultsText: "Each line and its translation appear here."
                 onSendRequested: (target, path, outputs) => mainWin.sendFiles("translate", target, path, outputs)
                 onNotice: message => toast.show(message)
+                onPreferencesRequested: mainWin.openPreferences()
 
                 TranslateSettings {
                     Layout.fillWidth: true
@@ -276,6 +337,7 @@ AppWindow {
                 emptyResultsText: "Each line and its new script appear here."
                 onSendRequested: (target, path, outputs) => mainWin.sendFiles("transliterate", target, path, outputs)
                 onNotice: message => toast.show(message)
+                onPreferencesRequested: mainWin.openPreferences()
 
                 TransliterateSettings {
                     Layout.fillWidth: true
@@ -302,6 +364,7 @@ AppWindow {
                 ]
                 emptyResultsText: "The lines being spoken appear here."
                 onNotice: message => toast.show(message)
+                onPreferencesRequested: mainWin.openPreferences()
 
                 DubSettings {
                     Layout.fillWidth: true
@@ -329,6 +392,7 @@ AppWindow {
                 emptyResultsText: "Lines from every step appear here as they are made."
                 onSendRequested: (target, path, outputs) => mainWin.sendFiles("workflow", target, path, outputs)
                 onNotice: message => toast.show(message)
+                onPreferencesRequested: mainWin.openPreferences()
 
                 WorkflowEditor {
                     Layout.fillWidth: true
@@ -339,6 +403,51 @@ AppWindow {
                     namingExample: "movie.srt, movie_ur.srt, movie_dub_ur.mkv"
                     onOptionChanged: (key, value) => workflowController.setOption(key, value)
                     onFormatToggled: (code, enabled) => workflowController.setFormat(code, enabled)
+                }
+            }
+        }
+    }
+
+    // Stopping a run (Esc or closing the window) is asked first, saying what stops.
+    AppDialog {
+        id: stopDialog
+        property bool closing: false
+        title: stopDialog.closing ? "Stop processing and close?" : "Stop processing?"
+        width: Math.min(460, mainWin.width - 48)
+        standardButtons: Dialog.Cancel
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Theme.spaceMd
+            Text {
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                text: "Still processing: " + mainWin._stopSummary(stopDialog.closing) + ". The file being processed stops "
+                    + "unfinished" + (stopDialog.closing ? ", and the queue isn't kept." : "; it and the rest stay in the queue.")
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                color: Theme.text
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                spacing: Theme.spaceSm
+                AppButton {
+                    kind: "danger"
+                    text: stopDialog.closing ? "Stop and close" : "Stop"
+                    onClicked: {
+                        stopDialog.close()
+                        if (stopDialog.closing) {
+                            mainWin._closeConfirmed = true
+                            mainWin.close()
+                        } else {
+                            mainWin.currentController.cancelQueue()
+                        }
+                    }
+                }
+                AppButton {
+                    kind: "primary"
+                    text: "Keep going"
+                    onClicked: stopDialog.close()
                 }
             }
         }
@@ -428,7 +537,7 @@ AppWindow {
             }
             Text {
                 Layout.fillWidth: true
-                text: "Shortcuts: Ctrl+O add files, Ctrl+Shift+O add folder, Ctrl+Enter start, Esc cancel, "
+                text: "Shortcuts: Ctrl+O add files, Ctrl+Shift+O add folder, Ctrl+Enter start, Esc stop, "
                     + "Ctrl+, preferences, Ctrl+M models, Ctrl+1 to Ctrl+" + mainWin.tasks.length + " switch tabs ("
                     + mainWin.tasks.map(t => t.label).join(", ") + ")."
                 font.family: Theme.fontFamily

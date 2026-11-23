@@ -152,12 +152,11 @@ New-Item -ItemType Directory -Path "build\installer" -Force | Out-Null
 
 Write-Step "Running PyInstaller  (this may take several minutes)"
 
-$PyArgs = Get-PyInstallerArgs -Name $AppName -Mode onedir -DistPath "dist"
-
-pyinstaller @PyArgs
-
-if ($LASTEXITCODE -ne 0) {
-    Fail "PyInstaller failed (exit $LASTEXITCODE). Check output above."
+# The app and the ccgen command line, two executables sharing _internal (scripts\bundle.ps1).
+try {
+    Invoke-OnedirBuild -Name $AppName -DistPath "dist"
+} catch {
+    Fail "$_. Check output above."
 }
 
 $ExePath = "$DistDir\$AppName.exe"
@@ -174,6 +173,9 @@ Write-Step "Verifying the bundle can load every engine, library, and QML module"
 
 if (-not (Test-Bundle $ExePath)) {
     Fail "Bundle self-test failed - a module, DLL, or data file is missing from the build. See the report above."
+}
+if (-not (Test-CliBundle "$DistDir\ccgen.exe")) {
+    Fail "The ccgen command line in the bundle doesn't run. See the output above."
 }
 
 # ── Shell extension DLL ───────────────────────────────────────────────────────

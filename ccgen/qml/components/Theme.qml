@@ -17,9 +17,9 @@ QtObject {
     readonly property color titleBar:     dark ? "#111317" : "#e9ebef"
     readonly property color border:       dark ? "#343a46" : "#d6dae1"
     readonly property color borderStrong: dark ? "#4a5263" : "#b7bec9"
-    // Outlines of text boxes, combo boxes, and switch tracks: at least 3:1 against surface
-    // (WCAG 1.4.11), where border is kept light for card edges and dividers.
-    readonly property color inputBorder:  dark ? "#646d7c" : "#7d8694"
+    // Outlines of text boxes, combo boxes, and switch tracks: at least 3:1 against surface and
+    // surfaceHover (WCAG 1.4.11), where border is kept light for card edges and dividers.
+    readonly property color inputBorder:  dark ? "#7a8394" : "#7d8694"
 
     // ── Text ─────────────────────────────────────────────────────────────────
     readonly property color text:      dark ? "#e8eaee" : "#1a1d23"
@@ -36,6 +36,7 @@ QtObject {
     readonly property color danger:      dark ? "#ff6b63" : "#c62828"
     readonly property color dangerSoft:  dark ? "#3a1d1d" : "#fdecec"
     readonly property color warning:     dark ? "#e0b341" : "#8a5a00"
+    readonly property color warningSoft: dark ? "#332a16" : "#fbf2dd"
     readonly property color focusRing:   dark ? "#8cc4ff" : "#0b62c4"
     // Dims the window behind a dialog. Dark in both themes: a pale wash over the dark theme looks
     // like Windows fading out a frozen app.
@@ -112,7 +113,9 @@ QtObject {
         mic: "",
         openExternal: "",
         sync: "",
+        refresh: "",
         chevronDown: "",
+        chevronRight: "",
         speaker: "",
         workflow: "",
         arrowUp: "",

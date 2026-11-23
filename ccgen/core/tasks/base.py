@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Generic, Optional, TypeVar
 
 from ccgen.core import AnySegment, Segment
+from ccgen.core.errors import describe
 from ccgen.core.tasks.configs import TaskConfigBase
 from ccgen.utils.callbacks import JobCancelled, emit_progress, emit_segment, emit_status
 from ccgen.utils.download_progress import cancellable
@@ -49,7 +50,11 @@ class TaskResult:
     input_path: str
     output_files: list[str] = field(default_factory=list)
     detected_language: str = ""
+    # A plain sentence with the next step (ccgen/core/errors.py), and the original text for the log.
     error: str = ""
+    error_detail: str = ""
+    # Which kind of problem it was (ccgen/core/errors.py KIND_*), for scripts that act on it.
+    error_kind: str = ""
     cancelled: bool = False
     warnings: list[str] = field(default_factory=list)
     # Language of the text in each written file, so another tab can take them over correctly.
@@ -169,7 +174,7 @@ class Task(ABC, Generic[_C]):
             ctx.warnings.extend(self._ctx.warnings)
         try:
             if not os.path.isfile(input_path):
-                raise FileNotFoundError(f"File not found: {input_path}")
+                raise FileNotFoundError(2, "File not found", input_path)
             with cancellable(self._cancel_event.is_set):
                 result = self._run(ctx)
             result.warnings = ctx.warnings + result.warnings
@@ -183,9 +188,7 @@ class Task(ABC, Generic[_C]):
             if self.cancelled:
                 return cancelled_result(input_path)
             _log.error("%s failed for %s: %r", type(self).__name__, input_path, e, exc_info=True)
-            return TaskResult(
-                success=False, input_path=input_path, error=str(e) or repr(e), warnings=ctx.warnings,
-            )
+            return failed_result(input_path, e, ctx.warnings)
 
     def _prepare(self, ctx: RunContext) -> None:
         """Load models before run(); tasks without models keep this no-op."""
@@ -193,6 +196,15 @@ class Task(ABC, Generic[_C]):
     @abstractmethod
     def _run(self, ctx: RunContext) -> TaskResult:
         """Do the work; may raise, run() turns exceptions into a failed result."""
+
+
+def failed_result(input_path: str, error: BaseException, warnings: Optional[list[str]] = None) -> TaskResult:
+    """The result of a run that raised: the error in plain words, its original text kept as detail."""
+    problem = describe(error, input_path)
+    return TaskResult(
+        success=False, input_path=input_path, error=problem.message, error_detail=problem.detail,
+        error_kind=problem.kind, warnings=list(warnings or []),
+    )
 
 
 def cancelled_result(input_path: str = "") -> TaskResult:

@@ -25,6 +25,9 @@
 #endif
 #define SourceDir "..\dist\CC-Gen-Ultimate"
 #define IconsDir "..\ccgen\assets\icons"
+; The PATH the "Add the ccgen command to PATH" task changes (shared.iss NeedsAddPath, RemoveFromPath)
+#define PathRoot "HKLM"
+#define PathKey "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 
 [Setup]
 ; App identification
@@ -56,17 +59,20 @@ PrivilegesRequired=admin
 ; Architectures
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
+; The PATH task changes the environment, so running terminals are told about it.
+ChangesEnvironment=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-english.EnableContextMenu=Add "Generate Subtitles with CC-Gen-Ultimate" to the right-click menu for video/audio/subtitle files
+english.EnableContextMenu=Add CC-Gen-Ultimate to the right-click menu of video, audio, and subtitle files (Generate Subtitles, Translate, Transliterate)
 english.ContextMenu=Explorer integration:
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "contextmenu"; Description: "{cm:EnableContextMenu}"; GroupDescription: "{cm:ContextMenu}"
+Name: "addtopath"; Description: "Add the ccgen command to PATH (make, translate, and dub subtitles from any terminal)"; GroupDescription: "Command line:"; Flags: unchecked
 
 [Files]
 ; Main application files (compiled executable and dependencies)
@@ -95,15 +101,24 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icons\CCGenUltimate.ico"; Tasks: desktopicon
 
 [Registry]
+; The ccgen command on PATH (taken off again at uninstall, shared.iss RemoveFromPath)
+Root: {#PathRoot}; Subkey: "{#PathKey}"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 ; =============================================================================
 ; IExplorerCommand CLSID registration (Windows 11 first-level context menu)
+; One CLSID per menu entry; they match native/src/shell_extension.cpp.
 ; =============================================================================
 Root: HKCR; Subkey: "CLSID\{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; ValueType: string; ValueName: ""; ValueData: "CC-Gen-Ultimate Subtitle Shell Extension"; Flags: uninsdeletekey; Tasks: contextmenu
 Root: HKCR; Subkey: "CLSID\{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ccgen_shell.dll"; Flags: uninsdeletekey; Tasks: contextmenu
 Root: HKCR; Subkey: "CLSID\{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "CLSID\{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; ValueType: string; ValueName: ""; ValueData: "CC-Gen-Ultimate Translate Shell Extension"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "CLSID\{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ccgen_shell.dll"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "CLSID\{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "CLSID\{{3382A0C2-1398-4A61-B731-53C435DEF132}"; ValueType: string; ValueName: ""; ValueData: "CC-Gen-Ultimate Transliterate Shell Extension"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "CLSID\{{3382A0C2-1398-4A61-B731-53C435DEF132}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ccgen_shell.dll"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "CLSID\{{3382A0C2-1398-4A61-B731-53C435DEF132}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Flags: uninsdeletekey; Tasks: contextmenu
 
 ; =============================================================================
-; Context menu: "Generate Subtitles with CC-Gen-Ultimate"
+; Context menu: "Generate Subtitles with CC-Gen-Ultimate" on video and audio files
 ; Registered per supported extension under SystemFileAssociations so it never
 ; touches (or overrides) the user's actual default "open with" association.
 ; =============================================================================
@@ -187,35 +202,71 @@ Root: HKCR; Subkey: "SystemFileAssociations\.wma\shell\CCGenUltimateSubtitles"; 
 Root: HKCR; Subkey: "SystemFileAssociations\.wma\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
 Root: HKCR; Subkey: "SystemFileAssociations\.wma\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
 
-Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: ""; ValueData: "Generate Subtitles with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
+; =============================================================================
+; Context menu: "Translate with CC-Gen-Ultimate" and "Transliterate with CC-Gen-Ultimate"
+; on subtitle files
+; Older versions put "Generate Subtitles" on subtitle files (CCGenUltimateSubtitles); it is
+; removed first.
+; =============================================================================
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateSubtitles"; ValueType: none; Flags: deletekey
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: ""; ValueData: "Translate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: ""; ValueData: "Transliterate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.srt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{3382A0C2-1398-4A61-B731-53C435DEF132}"; Flags: uninsdeletekey; Tasks: contextmenu
 
-Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: ""; ValueData: "Generate Subtitles with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateSubtitles"; ValueType: none; Flags: deletekey
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: ""; ValueData: "Translate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: ""; ValueData: "Transliterate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.vtt\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{3382A0C2-1398-4A61-B731-53C435DEF132}"; Flags: uninsdeletekey; Tasks: contextmenu
 
-Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: ""; ValueData: "Generate Subtitles with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateSubtitles"; ValueType: none; Flags: deletekey
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: ""; ValueData: "Translate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: ""; ValueData: "Transliterate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.lrc\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{3382A0C2-1398-4A61-B731-53C435DEF132}"; Flags: uninsdeletekey; Tasks: contextmenu
 
-Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: ""; ValueData: "Generate Subtitles with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateSubtitles"; ValueType: none; Flags: deletekey
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: ""; ValueData: "Translate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: ""; ValueData: "Transliterate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ass\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{3382A0C2-1398-4A61-B731-53C435DEF132}"; Flags: uninsdeletekey; Tasks: contextmenu
 
-Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: ""; ValueData: "Generate Subtitles with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateSubtitles"; ValueType: none; Flags: deletekey
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: ""; ValueData: "Translate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: ""; ValueData: "Transliterate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.ssa\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{3382A0C2-1398-4A61-B731-53C435DEF132}"; Flags: uninsdeletekey; Tasks: contextmenu
 
-Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: ""; ValueData: "Generate Subtitles with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateSubtitles"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateSubtitles"; ValueType: none; Flags: deletekey
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: ""; ValueData: "Translate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTranslate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{00B71345-AC5E-4B8C-B19B-4B7A583417F9}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: ""; ValueData: "Transliterate with CC-Gen-Ultimate"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\icons\CCGenUltimate.ico"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKCR; Subkey: "SystemFileAssociations\.sbv\shell\CCGenUltimateTransliterate"; ValueType: string; ValueName: "ExplorerCommandHandler"; ValueData: "{{3382A0C2-1398-4A61-B731-53C435DEF132}"; Flags: uninsdeletekey; Tasks: contextmenu
 
 ; =============================================================================
 ; Optional: Store installation info (useful for future updates/uninstallers)
@@ -230,6 +281,7 @@ Filename: "https://github.com/ShahFaisalGfG/CC-Gen-Ultimate"; Description: "View
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillCcGenUltimate"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM ccgen.exe"; Flags: runhidden; RunOnceId: "KillCcgen"
 Filename: "{sys}\regsvr32.exe"; Parameters: "/s /u ""{app}\ccgen_shell.dll"""; Flags: runhidden; RunOnceId: "UnregShellExt"
 
 [UninstallDelete]
@@ -290,6 +342,8 @@ procedure RemoveStaleUserRegistryEntries();
 begin
   // Clean up per-user CLSID and context-menu entries left by older per-user installs.
   RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\CLSID\{5E1DC6F3-4ECF-47F4-BB26-F8D3097DE182}');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\CLSID\{00B71345-AC5E-4B8C-B19B-4B7A583417F9}');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\CLSID\{3382A0C2-1398-4A61-B731-53C435DEF132}');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

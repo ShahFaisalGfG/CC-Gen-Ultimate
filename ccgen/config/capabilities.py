@@ -153,6 +153,11 @@ def language_name(code: str) -> str:
     return next((label for label, value in LanguageOptions.TRANSLATION_TARGETS if value == code), code)
 
 
+def scheme_name(code: str) -> str:
+    """The display name of a transliteration script code ("roman" -> "Roman / Latin"), or the code."""
+    return next((label for label, value in TransliterationDefaults.SCHEMES if value == code), code)
+
+
 def script_for_language(language: str) -> str:
     """The transliteration script a language's text is written in, or "" when no script fits."""
     if language in _LATIN_SCRIPT_LANGUAGES:

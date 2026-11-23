@@ -17,10 +17,14 @@ FocusScope {
     property int scanFound: 0
     // What the empty queue explains, one step per line, for this tab.
     property var firstRunSteps: []
+    // What this tab takes, e.g. "video or audio file", for the empty queue's prompt.
+    property string fileNoun: "video, audio, or subtitle file"
     // Tabs a finished file's outputs can be handed to: [{ key, label }].
     property var sendTargets: []
     // True on the Dub tab, where a media row can be paired with the subtitle it speaks.
     property bool allowCompanion: false
+    // True while the tab runs its queue (a row can't be run again until it ends).
+    property bool busy: false
     // Languages a subtitle row's picker offers ([{ label, code }]), and whether the tab needs one.
     property var languageOptions: []
     property bool languageRequired: false
@@ -33,6 +37,9 @@ FocusScope {
     signal clearRequested()
     signal sendRequested(string target, string path, var outputs)
     signal companionRequested(int row)
+    signal retryRequested(string path)
+    signal copyRequested(string text)
+    signal openLogRequested()
 
     property int _anchor: -1
 
@@ -51,88 +58,90 @@ FocusScope {
         listView.forceActiveFocus()
     }
 
-    function _openMenu(index) {
+    // Select and show one file, with keyboard focus on the list (the run bar's "Choose language").
+    function showRow(path) {
+        var index = root.fileModel.rowOf(path)
+        if (index < 0) return
+        root.fileModel.setSingle(index)
+        root._anchor = index
+        listView.currentIndex = index
+        listView.positionViewAtIndex(index, ListView.Contain)
+        listView.forceActiveFocus()
+    }
+
+    function _openMenu(index, fromKeyboard) {
         if (index < 0) return
         var item = listView.itemAtIndex(index) as FileItem
         if (!item || !item.selected)
             root._click(index, Qt.NoModifier)
         contextMenu.row = index
         contextMenu.info = root.fileModel.rowAt(index)
-        contextMenu.popup()
+        contextMenu.openAt(fromKeyboard ? listView.itemAtIndex(index) : null)
     }
 
-    // Empty state
-    ColumnLayout {
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 2 * Theme.spaceXl, 320)
-        spacing: Theme.spaceMd
+    // Empty state: scrolls when the window is too short for it (the Dub tab's steps are long).
+    Flickable {
+        id: emptyFlick
+        anchors.fill: parent
         visible: root.fileModel.count === 0 && !root.scanning
+        clip: true
+        contentWidth: width
+        contentHeight: Math.max(height, emptyColumn.implicitHeight + 2 * Theme.spaceXl)
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-        Rectangle {
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 64
-            Layout.preferredHeight: 64
-            radius: 32
-            color: Theme.accentSoft
-            Icon { anchors.centerIn: parent; name: "captions"; size: 28; color: Theme.accent }
-        }
-        Text {
-            Layout.fillWidth: true
-            horizontalAlignment: Text.AlignHCenter
-            text: "Add files to get started"
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSubtitle
-            font.weight: Font.DemiBold
-            color: Theme.text
-            Accessible.role: Accessible.Heading
-        }
-        Text {
-            Layout.fillWidth: true
-            horizontalAlignment: Text.AlignHCenter
-            text: "Drop videos, audio, subtitle files, or whole folders here."
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontBody
-            color: Theme.textMuted
-            wrapMode: Text.WordWrap
-        }
-        RowLayout {
-            Layout.alignment: Qt.AlignHCenter
-            spacing: Theme.spaceSm
-            AppButton {
-                kind: "primary"
-                text: "Add files"
-                iconName: "add"
-                toolTipText: "Choose video, audio, or subtitle files (Ctrl+O)"
-                onClicked: root.addFilesRequested()
-            }
-            AppButton {
-                text: "Add folder"
-                iconName: "folder"
-                toolTipText: "Add every supported file in a folder and its subfolders (Ctrl+Shift+O)"
-                onClicked: root.addFolderRequested()
-            }
-        }
+        ColumnLayout {
+            id: emptyColumn
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Math.max(Theme.spaceXl, (emptyFlick.height - implicitHeight) / 2)
+            width: Math.min(emptyFlick.width - 2 * Theme.spaceXl, 320)
+            spacing: Theme.spaceMd
 
-        // How a first run works, so nobody has to guess what comes after adding files.
-        Column {
-            id: firstRunSteps
-            Layout.fillWidth: true
-            Layout.topMargin: Theme.spaceSm
-            spacing: Theme.spaceXs
-            Repeater {
-                model: root.firstRunSteps
-                delegate: Text {
-                    required property int index
-                    required property string modelData
-                    width: firstRunSteps.width
-                    text: (index + 1) + ".  " + modelData
-                    wrapMode: Text.WordWrap
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontCaption
-                    color: Theme.textMuted
+            EmptyState {
+                Layout.fillWidth: true
+                iconName: "captions"
+                title: "Add files to get started"
+                text: "Drop " + root.fileNoun + "s, or whole folders, here."
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: Theme.spaceSm
+                AppButton {
+                    kind: "primary"
+                    text: "Add files"
+                    iconName: "add"
+                    toolTipText: "Choose " + root.fileNoun + "s (Ctrl+O)"
+                    onClicked: root.addFilesRequested()
+                }
+                AppButton {
+                    text: "Add folder"
+                    iconName: "folder"
+                    toolTipText: "Add every usable file in a folder and its subfolders (Ctrl+Shift+O)"
+                    onClicked: root.addFolderRequested()
                 }
             }
-        }
+
+            // How a first run works, so nobody has to guess what comes after adding files.
+            Column {
+                id: firstRunSteps
+                Layout.fillWidth: true
+                Layout.topMargin: Theme.spaceSm
+                spacing: Theme.spaceXs
+                Repeater {
+                    model: root.firstRunSteps
+                    delegate: Text {
+                        required property int index
+                        required property string modelData
+                        width: firstRunSteps.width
+                        text: (index + 1) + ".  " + modelData
+                        wrapMode: Text.WordWrap
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                        color: Theme.textMuted
+                    }
+                }
+            }
+    }
     }
 
     ColumnLayout {
@@ -213,7 +222,7 @@ FocusScope {
                 languageRequired: root.languageRequired
                 onLanguageChosen: (index, language) => root.fileModel.setChosenLanguage(index, language)
                 onClicked: (index, modifiers) => root._click(index, modifiers)
-                onContextMenuRequested: index => root._openMenu(index)
+                onContextMenuRequested: index => root._openMenu(index, false)
                 onRemoveRequested: index => root.fileModel.removeAt(index)
             }
 
@@ -230,7 +239,7 @@ FocusScope {
                 } else if (event.key === Qt.Key_Space && listView.currentIndex >= 0) {
                     root.fileModel.toggleSelection(listView.currentIndex)
                 } else if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && shift)) {
-                    root._openMenu(Math.max(0, listView.currentIndex))
+                    root._openMenu(Math.max(0, listView.currentIndex), true)
                 } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down
                            || event.key === Qt.Key_Home || event.key === Qt.Key_End) {
                     var cur = listView.currentIndex
@@ -255,58 +264,80 @@ FocusScope {
         }
     }
 
-    Menu {
+    AppMenu {
         id: contextMenu
         property int row: -1
         property var info: ({})
         readonly property var outputs: contextMenu.info.outputs || []
+        readonly property string status: contextMenu.info.status || ""
 
-        MenuItem {
+        // A failed row's next steps come first.
+        AppMenuItem {
+            text: contextMenu.status === "done" ? "Run again" : "Try again"
+            visible: contextMenu.status === "error" || contextMenu.status === "cancelled"
+                || contextMenu.status === "skipped" || contextMenu.status === "done"
+            enabled: !root.busy
+            onTriggered: root.retryRequested(contextMenu.info.path)
+        }
+        AppMenuItem {
+            text: "Copy details"
+            visible: (contextMenu.info.message || "").length > 0
+            onTriggered: root.copyRequested([contextMenu.info.path, contextMenu.info.message,
+                                             contextMenu.info.detail || ""].filter(part => part.length > 0).join("\n"))
+        }
+        AppMenuItem {
+            text: "Open log"
+            visible: contextMenu.status === "error"
+            onTriggered: root.openLogRequested()
+        }
+        AppMenuSeparator {
+            visible: contextMenu.status === "error" || contextMenu.status === "cancelled"
+                || contextMenu.status === "skipped" || contextMenu.status === "done"
+        }
+        AppMenuItem {
             text: "Show in folder"
             enabled: (contextMenu.info.path || "").length > 0
             onTriggered: root.revealRequested(contextMenu.info.path)
         }
-        MenuItem {
+        AppMenuItem {
             text: "Show the result"
             enabled: contextMenu.outputs.length > 0
             onTriggered: root.revealRequested(contextMenu.outputs[0])
         }
-        Menu {
+        AppMenu {
             title: "Send the result to"
             enabled: contextMenu.outputs.length > 0 && root.sendTargets.length > 0
             Repeater {
                 model: root.sendTargets
-                delegate: MenuItem {
+                delegate: AppMenuItem {
                     required property var modelData
                     text: modelData.label
                     onTriggered: root.sendRequested(modelData.key, contextMenu.info.path, contextMenu.outputs)
                 }
             }
         }
-        MenuItem {
+        AppMenuItem {
             text: "Choose subtitle to speak..."
             visible: root.allowCompanion && contextMenu.info.kind !== "subtitle"
-            height: visible ? implicitHeight : 0
             onTriggered: root.companionRequested(contextMenu.row)
         }
-        MenuItem {
+        AppMenuItem {
             text: "Transcribe instead"
             visible: root.allowCompanion && (contextMenu.info.companion || "").length > 0
-            height: visible ? implicitHeight : 0
             onTriggered: root.fileModel.setCompanion(contextMenu.row, "")
         }
         // The same choice as the row's picker, reachable from the keyboard (Menu or Shift+F10).
-        Menu {
+        AppMenu {
             title: "Language"
             enabled: contextMenu.info.kind === "subtitle" || (contextMenu.info.companion || "").length > 0
-            MenuItem {
+            AppMenuItem {
                 text: "Auto (from the file name)"
                 enabled: (contextMenu.info.language || "").length > 0
                 onTriggered: root.fileModel.setChosenLanguage(contextMenu.row, "")
             }
             Repeater {
                 model: root.languageOptions
-                delegate: MenuItem {
+                delegate: AppMenuItem {
                     required property var modelData
                     text: modelData.label
                     checkable: true
@@ -315,18 +346,19 @@ FocusScope {
                 }
             }
         }
-        MenuSeparator {}
-        MenuItem {
+        AppMenuSeparator {}
+        AppMenuItem {
             text: root.fileModel.selectedCount > 1 ? "Remove " + root.fileModel.selectedCount + " selected" : "Remove"
             onTriggered: root.fileModel.removeSelected()
         }
-        MenuItem {
+        AppMenuItem {
             text: "Remove finished"
             enabled: root.fileModel.doneCount > 0
             onTriggered: root.fileModel.removeFinished()
         }
-        MenuItem {
+        AppMenuItem {
             text: "Clear queue"
+            danger: true
             onTriggered: root.clearRequested()
         }
     }

@@ -35,6 +35,8 @@ CC-Gen-Ultimate is a **free, open-source** desktop app that turns any video or a
     - [Option 2 - Installers](#option-2---installers)
     - [Updating](#updating)
   - [Quick Start](#quick-start)
+  - [Command Line](#command-line)
+    - [For AI coding agents](#for-ai-coding-agents)
   - [Screenshots](#screenshots)
   - [How It Works](#how-it-works)
     - [Performance Profiles](#performance-profiles)
@@ -147,7 +149,7 @@ Each installer comes in three editions, which differ only in the GPUs that speec
 
 Every edition runs Piper and Kokoro voices on any DirectX 12 GPU (NVIDIA, AMD, or Intel), and everything falls back to the CPU when no GPU is available. If your NVIDIA GPU is outside an edition's range, **Preferences > Performance** says which edition can use it.
 
-Models (`faster-whisper`, translation models, transliteration models, and dubbing voices) download automatically on first use and are cached locally - no repeated downloads, no internet required afterward. **Models** in the title bar lists them all, with download and remove buttons.
+Models (`faster-whisper`, translation models, transliteration models, and dubbing voices) download automatically on first use and are cached locally - no repeated downloads, no internet required afterward. **Models** in the title bar lists them all with their sizes, download and remove buttons, the download speed, and **Try again** for a download that failed; each download checks for free space first, and the main window's run bar shows downloads in progress. Before **Start**, the run bar says what a first run will download and about how long it takes.
 
 ### Updating
 
@@ -162,6 +164,8 @@ CC-Gen-Ultimate updates itself. Once a day it asks GitHub whether a newer versio
 3. **Dub** - add the video to the **Dub** tab (or send the translation there; it pairs with its video automatically), choose the language to dub into and the voices (voice cloning is the default), and click **Start**
 4. **Or do it all at once** - on the **Workflow** tab, keep the starter steps (Generate, then Translate), add a **Dub** step, queue your videos, and click **Start**
 
+From File Explorer, right-click videos or audio for **Generate Subtitles with CC-Gen-Ultimate**, or subtitle files for **Translate** or **Transliterate with CC-Gen-Ultimate** (an installer option). Files opened while the app is already open join its queue instead of starting a second copy.
+
 Output files are written next to the input (or to the folder chosen under **Output > Save to**), named by what they contain: `video.srt` (original), `video_ur.srt` (translated to Urdu), `video_tr_ur_roman.srt` (transliterated Urdu → Roman), `video_dub_ur.mkv` (dubbed in Urdu). When the run ends, **Open output folder** takes you straight to them.
 
 ### Keyboard shortcuts
@@ -170,11 +174,51 @@ Output files are written next to the input (or to the folder chosen under **Outp
 |---|---|
 | **Ctrl+O** / **Ctrl+Shift+O** | Add files / add a folder |
 | **Ctrl+Enter** or **F5** | Start processing the queue |
-| **Esc** | Cancel (the remaining files stay queued) |
+| **Esc** | Stop (asks first; the file being processed and the rest stay queued) |
 | **Ctrl+1** to **Ctrl+5** | Generate / Translate / Transliterate / Dub / Workflow tab |
 | **Ctrl+,** / **Ctrl+M** / **F1** | Preferences / Manage Models / About |
 | **Up/Down**, **Shift+Up/Down**, **Space**, **Ctrl+A**, **Delete** | Move, extend, toggle, select all, and remove files in the queue |
 | **Menu key** or **Shift+F10** | Context menu for the current file |
+
+---
+
+## Command Line
+
+`ccgen` does what the tabs do, from a terminal or a script: it starts from the options saved in **Preferences**, builds each file's job the way the tab does, and writes the same files. It sits beside `CC-Gen-Ultimate.exe` in the installed folder and in the portable folder; the installers can add it to PATH (**Add the ccgen command to PATH**, off by default). From source, run `python -m ccgen`.
+
+```powershell
+ccgen generate "D:\Videos\talk.mp4"                          # talk.srt
+ccgen generate "D:\Lectures" --model small --formats srt,vtt  # a folder and its subfolders
+ccgen translate "D:\Videos\talk.mp4" --to ur                  # transcribes, then talk_ur.srt
+ccgen translate "D:\Subs\talk.srt" --subtitle-language en --to es
+ccgen transliterate "D:\Subs\talk_ur.srt" --to roman           # talk_tr_ur_roman.srt
+ccgen dub "D:\Videos\talk.mp4" --to es --voices kokoro          # talk_dub_es.mkv
+ccgen workflow "D:\Videos" --preset "Urdu subtitles"           # a workflow saved in the Workflow tab
+ccgen models list                                             # what's downloaded, and the ids for models download
+ccgen settings set translation.target_lang ur                 # the same defaults the app uses
+ccgen --help                                                  # every command; ccgen generate --help for its options
+```
+
+- Results already there are skipped; `--existing replace` writes over them and `--existing keep-both` saves the new ones as `talk (2).srt`.
+- `--json` prints one JSON event per line on stdout (progress, each file written, problems, and a closing `done`), for scripts. Words for people go to stderr.
+- Exit status: `0` every file done, `1` some failed, `2` the input, an option, a licence, or a folder can't be used, `130` stopped with Ctrl+C (run the same command again to finish).
+- NLLB-200, OmniVoice, and XTTS-v2 allow non-commercial use only. A command that would use one stops and says so; `--accept-terms nllb` (or `omnivoice`, `xtts`) accepts its licence on this PC, as the app's licence notice does.
+- `ccgen options` lists every language, model, script, and voice code; `ccgen hardware` shows the GPU and the recommended performance profile.
+
+A one-file `CC-Gen-Ultimate.exe` built from source with `scripts\build_portable.ps1` has no `ccgen`: a second one-file exe would carry the whole speech and translation stack again.
+
+### For AI coding agents
+
+`ccgen` comes with an [Agent Skill](skills/ccgen/SKILL.md) that teaches coding agents (Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, and others) to use it, ask before accepting a model licence, and read its JSON output:
+
+```powershell
+ccgen skill install                  # into ~/.agents/skills and ~/.claude/skills
+ccgen skill install --agent cursor   # or an agent's own folder
+ccgen skill show                     # print it, for agents that can't load skills
+npx skills add ShahFaisalGfG/CC-Gen-Ultimate
+```
+
+The full command reference and the JSON events are in [skills/ccgen/references](skills/ccgen/references).
 
 ---
 
@@ -304,13 +348,13 @@ CC-Gen-Ultimate's UI talks to a small local backend embedded in the same app pro
 | **Appearance** | Theme: System / Light / Dark |
 | **Transcription** | Default model and spoken language, compute device (Automatic / CPU / NVIDIA GPU), skip silence and music (voice activity filter) |
 | **Translation** | Translation model, default source language for new Workflow translate steps (or detect from each file), and target language (also the Dub tab's starting language) |
-| **Transliteration** | Default source/target script and engine (rule/neural) |
+| **Transliteration** | Default source script (or Automatic, from each subtitle's language), target script, and engine (rule/neural) |
 | **Dubbing** | Default voices, speakers, fastest speech, how the dub is saved, whether it plays by default, and the device it runs on |
 | **Subtitles** | Default formats, characters per line, lines per subtitle, default save folder |
 | **Updates** | Check for updates once a day, install them automatically when the app closes (both on by default), **Check now**, and when the last check ran |
 | **Advanced** | Logging on/off, log detail (warnings and errors / everything), open or clear the log files |
 
-All settings persist to `%APPDATA%\CC-Gen-Ultimate\settings.json` and apply to every tab and new workflow step automatically; changes you make on a tab stay in place for that session. Logs are written to `%APPDATA%\CC-Gen-Ultimate\logs`. Piper and Kokoro voices are stored in `%LOCALAPPDATA%\CC-Gen-Ultimate\voices` and translation models in `%LOCALAPPDATA%\CC-Gen-Ultimate\translation`; the other models live in the Hugging Face and Argos caches in your user folder.
+Closing Preferences with unsaved changes asks whether to save them. All settings persist to `%APPDATA%\CC-Gen-Ultimate\settings.json` and apply to every tab and new workflow step automatically; changes you make on a tab stay in place for that session. Logs are written to `%APPDATA%\CC-Gen-Ultimate\logs`. Piper and Kokoro voices are stored in `%LOCALAPPDATA%\CC-Gen-Ultimate\voices` and translation models in `%LOCALAPPDATA%\CC-Gen-Ultimate\translation`; the other models live in the Hugging Face and Argos caches in your user folder.
 
 ---
 
@@ -337,18 +381,15 @@ pip install -r requirements.txt
 # 4. Run the GUI
 python app.py
 
-# ...or run one task without the UI
-python main.py generate path\to\video.mp4 --formats srt,vtt   # --model small|large-v3-turbo|..., --profile light|balanced|quality
-python main.py translate path\to\video_en.srt --target-lang ur   # --engine nllb|madlad|argos
-python main.py dub path\to\video.mp4 --subtitle path\to\video_ur.srt   # --mode omnivoice|xtts|kokoro|piper, --quality full|fast
-python main.py workflow path\to\video.mp4 steps.json   # e.g. [{"kind": "generate"}, {"kind": "translate", "input": "step:0", "target_lang": "ur"}]
-python main.py --help   # every task and its options
+# ...or the command line (see Command Line above)
+python -m ccgen generate path\to\video.mp4 --formats srt,vtt
+python -m ccgen --help
 ```
 
 ### Running Tests & Checks
 
 ```powershell
-pytest tests/ -v
+$env:QT_QPA_PLATFORM = "offscreen"; pytest tests/ -q
 pyright ccgen/ app.py main.py server.py
 cd ccgen/qml; pyside6-qmllint -I . -I components main.qml PreferencesWindow.qml ManageModelsWindow.qml components/*.qml pages/*.qml
 ```
@@ -365,7 +406,7 @@ pip install "pyinstaller>=6.17"
 
 Each build first installs the PyTorch build for its GPU edition and the DirectML build of ONNX Runtime into the active environment (see `Install-GpuRuntime` in `scripts/bundle.ps1`): PyTorch 2.8.0 for CUDA 12.8 in the standard edition, 2.8.0 for Intel XPU in the Intel GPU edition, and 2.7.1 for CUDA 12.6 in the Legacy NVIDIA edition, the newest PyTorch that still runs Maxwell GPUs. With `-LegacyNvidia`, the Legacy edition is built first, so the environment ends on the other edition's PyTorch.
 
-The PyInstaller options live in `scripts/bundle.ps1`, shared by every build script and the release workflow. Every exe the build makes, the installers, and the Explorer extension `ccgen_shell.dll` carry CC-Gen-Ultimate's name as their product name and the version from `pyproject.toml`, as code signing requires. After bundling, each build runs the app with `--self-test`, which imports every engine, loads the native libraries, decodes a short audio clip, loads the dubbing voices' pronunciation data and dictionaries, starts the local API, and compiles every QML screen. It also lists the GPUs each runtime can use. A module or DLL missing from the bundle stops the build with a report instead of reaching users. You can run the same check on any build yourself: `CC-Gen-Ultimate.exe --self-test report.txt`.
+The PyInstaller options live in `scripts/bundle.ps1`, shared by every build script and the release workflow. The installers' folder holds two executables sharing one `_internal` folder: `CC-Gen-Ultimate.exe` and the console `ccgen.exe` (`scripts/add_cli_exe.py` adds it to the spec), and each build checks that `ccgen --version` and `ccgen skill show` run. Every exe the build makes, the installers, and the Explorer extension `ccgen_shell.dll` carry CC-Gen-Ultimate's name as their product name and the version from `pyproject.toml`, as code signing requires. After bundling, each build runs the app with `--self-test`, which imports every engine, loads the native libraries, decodes a short audio clip, loads the dubbing voices' pronunciation data and dictionaries, starts the local API, and compiles every QML screen. It also lists the GPUs each runtime can use. A module or DLL missing from the bundle stops the build with a report instead of reaching users. You can run the same check on any build yourself: `CC-Gen-Ultimate.exe --self-test report.txt`.
 
 Every icon size and `CCGenUltimate.ico` are drawn by `scripts/make_icons.py`; after changing it, run `python scripts/make_icons.py` to regenerate them.
 ---

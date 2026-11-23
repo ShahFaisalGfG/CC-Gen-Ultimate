@@ -21,6 +21,7 @@ from typing import Any
 from PySide6.QtCore import Property, QCoreApplication, QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 
+from ccgen.core.errors import KIND_NETWORK, describe
 from ccgen.services import update_install as install
 from ccgen.services.update_feed import (
     MANIFEST_NAME,
@@ -52,6 +53,11 @@ READY = "ready"
 FAILED = "failed"
 ERROR = "error"
 _BANNER_STATES = frozenset({AVAILABLE, DOWNLOADING, READY, FAILED, ERROR})
+# What a failed check or download says; the error itself goes to the log.
+CHECK_OFFLINE = "Couldn't check for updates. Check your internet connection and try again."
+CHECK_FAILED = "Couldn't check for updates right now. Try again later."
+DOWNLOAD_OFFLINE = "The update couldn't be downloaded. Check your internet connection and click Try again."
+DOWNLOAD_FAILED = "The update couldn't be downloaded. Click Try again."
 
 
 @dataclass(frozen=True)
@@ -99,7 +105,7 @@ class _CheckWorker(QRunnable):
         except FeedError as failure:
             error = str(failure)
         except Exception as failure:  # the thread boundary: any error must still end the check
-            error = f"unexpected error: {failure!r}"
+            error = f"unexpected error: {type(failure).__name__}: {failure}"
         try:
             self.signals.checked.emit(release, error, metered)
         except RuntimeError:
@@ -136,7 +142,7 @@ class _DownloadWorker(QRunnable):
         except install.InstallError as failure:
             error = str(failure)
         except Exception as failure:  # the thread boundary
-            error = f"The download failed: {failure!r}"
+            error = f"unexpected error: {type(failure).__name__}: {failure}"
         try:
             self.signals.downloaded.emit(paths, error, cancelled)
         except RuntimeError:
@@ -399,7 +405,8 @@ class UpdateController(QObject):
         if error:
             self._config.log(f"Update check failed: {error}", False)
             if manual:
-                self._set_status(ERROR, f"Couldn't check for updates: {error}.")
+                offline = describe(error).kind == KIND_NETWORK
+                self._set_status(ERROR, CHECK_OFFLINE if offline else CHECK_FAILED)
                 self.notice.emit(self._message)
             else:
                 self._restore_after_check()
@@ -487,7 +494,8 @@ class UpdateController(QObject):
             return
         if error or not paths:
             self._config.log(f"Update download failed: {error}", True)
-            self._set_status(ERROR, error or "The update couldn't be downloaded.")
+            offline = bool(error) and describe(error).kind == KIND_NETWORK
+            self._set_status(ERROR, DOWNLOAD_OFFLINE if offline else DOWNLOAD_FAILED)
             return
         folder = self._folder(release.version)
         self._saved.pending_version = release.version

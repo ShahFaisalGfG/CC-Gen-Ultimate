@@ -80,8 +80,10 @@ class TestResolution:
         assert profiles.transliteration_engine("neural", "light", "hi", "ur") == "neural"
 
     def test_dubbing_clones_with_omnivoice_fast_except_on_maximum_quality(self):
-        assert profiles.dub_engine("auto", "quality") == profiles.DubChoice(DubbingDefaults.MODE_OMNIVOICE, False)
-        assert profiles.dub_engine("auto", "light") == profiles.DubChoice(DubbingDefaults.MODE_OMNIVOICE, True)
+        assert profiles.dub_engine("auto", "quality") == profiles.DubChoice(DubbingDefaults.MODE_OMNIVOICE, False, True)
+        assert profiles.dub_engine("auto", "balanced") == profiles.DubChoice(DubbingDefaults.MODE_OMNIVOICE, True, True)
+        # A first dub on the Light profile needs no 3.7 GB download: Kokoro, or Piper where Kokoro can't.
+        assert profiles.dub_engine("auto", "light") == profiles.DubChoice(DubbingDefaults.MODE_KOKORO, True, True)
         assert profiles.dub_engine("piper", "quality").mode == "piper"
 
     def test_dubbing_quality_overrides_the_profile(self):

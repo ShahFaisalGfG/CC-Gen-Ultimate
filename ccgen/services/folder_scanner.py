@@ -4,59 +4,24 @@
 # per file, and one model insert per file all ran on the GUI thread. This worker walks the tree
 # with os.scandir, whose directory entries already carry file type and size on Windows, and
 # hands rows to the model in batches sized by time, so the list fills smoothly and the UI keeps
-# repainting. A scan can be cancelled at any time (new scan, clear list, app shutdown).
+# repainting. A scan can be cancelled at any time (new scan, clear list, app shutdown). The walk
+# itself (iter_files) is in ccgen/core/jobs.py, which the command line uses too.
 
 import logging
-import os
 import threading
 import time
-from typing import Callable, Iterable, Iterator, Optional
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
+
+from ccgen.core.jobs import iter_files
+
+__all__ = ["FolderScanSignals", "FolderScanWorker", "iter_files"]
 
 _log = logging.getLogger(__name__)
 
 # Rows are flushed to the GUI at most this often, or sooner once this many are waiting.
 _FLUSH_INTERVAL_S = 0.1
 _MAX_BATCH = 2000
-
-
-def iter_files(
-    roots: Iterable[str],
-    extensions: frozenset[str],
-    is_cancelled: Callable[[], bool] = lambda: False,
-    on_error: Optional[Callable[[str], None]] = None,
-) -> Iterator[tuple[str, int]]:
-    """Yield (path, size_bytes) for every file under `roots` whose extension is in `extensions`.
-
-    Directories are walked depth-first in case-insensitive name order, so results arrive in the
-    order a file browser would list them. Symlinked directories are not followed (avoids loops),
-    and unreadable directories are reported through `on_error` and skipped.
-    """
-    stack = list(reversed([os.path.normpath(r) for r in roots]))
-    while stack:
-        if is_cancelled():
-            return
-        folder = stack.pop()
-        try:
-            with os.scandir(folder) as entries:
-                listing = sorted(entries, key=lambda e: e.name.casefold())
-        except OSError as error:
-            if on_error:
-                on_error(f"Skipped {folder}: {error.strerror or error}")
-            continue
-        subfolders: list[str] = []
-        for entry in listing:
-            if is_cancelled():
-                return
-            try:
-                if entry.is_dir(follow_symlinks=False):
-                    subfolders.append(entry.path)
-                elif os.path.splitext(entry.name)[1].lower() in extensions and entry.is_file():
-                    yield entry.path, entry.stat().st_size
-            except OSError as error:
-                _log.debug("Skipping unreadable entry %s: %r", entry.path, error)
-        stack.extend(reversed(subfolders))
 
 
 class FolderScanSignals(QObject):

@@ -7,7 +7,7 @@
 import logging
 from typing import Optional
 
-from ccgen.config.capabilities import language_name, script_for_language
+from ccgen.config.capabilities import language_name, scheme_name, script_for_language
 from ccgen.config.defaults import DubbingDefaults, TransliterationDefaults
 from ccgen.config.profiles import transliteration_engine, whisper_model
 from ccgen.core.audio import load_audio
@@ -34,6 +34,13 @@ from ccgen.engines.transliteration import create_engine as create_transliteratio
 
 _log = logging.getLogger(__name__)
 
+# A step in people's words, for "Step 1 of 2: Making subtitles".
+STEP_LABELS = {
+    "generate": "Making subtitles",
+    "translate": "Translating",
+    "transliterate": "Transliterating",
+    "dub": "Dubbing",
+}
 # Speech recognition models all load in prepare(), so their "load" stages come first.
 _STEP_STAGES = {
     "generate": ["transcribe"],
@@ -78,7 +85,7 @@ class WorkflowTask(Task[WorkflowConfig]):
         source_track: Optional[Track] = None
         detected = ""
         for index, step in enumerate(cfg.steps):
-            ctx.status(f"Step {index + 1} of {len(cfg.steps)}: {step.kind}")
+            ctx.status(f"Step {index + 1} of {len(cfg.steps)}: {STEP_LABELS[step.kind]}")
             if isinstance(step, GenerateStep):
                 track = self._generate(index, step, ctx)
                 detected = detected or track.language
@@ -98,14 +105,15 @@ class WorkflowTask(Task[WorkflowConfig]):
                 if step.write_output:
                     files += self._write(track, f"_{step.target_lang}", languages, ctx)
             elif isinstance(step, TransliterateStep):
-                track, source_scheme = self._transliterate(step, text, ctx)
+                track, source_scheme, target_scheme = self._transliterate(step, text, ctx)
                 if step.write_output:
-                    suffix = transliteration_suffix(source_scheme, step.target_scheme)
+                    suffix = transliteration_suffix(source_scheme, target_scheme)
                     files += self._write(track, suffix, languages, ctx)
             else:
                 path, language = self._dub(step, text, ctx)
-                files.append(path)
-                languages[path] = language
+                if path:
+                    files.append(path)
+                    languages[path] = language
                 track = None
             tracks.append(track)
         return TaskResult(
@@ -145,29 +153,37 @@ class WorkflowTask(Task[WorkflowConfig]):
         engine, meaning = create_translator(step.engine, source, step.target_lang, self.config.profile, for_speech)
         return translate_track(text, engine, source, step.target_lang, ctx, meaning)
 
-    def _transliterate(self, step: TransliterateStep, text: Track, ctx: RunContext) -> tuple[Track, str]:
-        """Convert an earlier step's text to the step's script; return (track, source script).
+    def _transliterate(self, step: TransliterateStep, text: Track, ctx: RunContext) -> tuple[Track, str, str]:
+        """Convert an earlier step's text to the step's script; return (track, source script, target script).
 
         An "auto" source script is the script of the text's language, which a generate step
         only learns while transcribing, so the pair is checked here.
         """
         ctx.begin("transliterate", "Transliterating...")
         source = step.source_scheme
+        target = step.target_scheme
         if source == TransliterationDefaults.SOURCE_AUTO:
             source = text.script or script_for_language(text.language)
             if not source:
                 raise ValueError(
                     f"Transliteration doesn't support {language_name(text.language) or 'this language'}'s script."
                 )
-            validate_transliterate(step.engine, source, step.target_scheme, self.config.profile)
+            if source == target and step.alternate_target and step.alternate_target != source:
+                ctx.warn(f"The text is already in that script, so it was converted to "
+                         f"{scheme_name(step.alternate_target)} instead.")
+                target = step.alternate_target
+            validate_transliterate(step.engine, source, target, self.config.profile)
         engine = create_transliteration_engine(
-            transliteration_engine(step.engine, self.config.profile, source, step.target_scheme),
-            source_scheme=source, target_scheme=step.target_scheme,
+            transliteration_engine(step.engine, self.config.profile, source, target),
+            source_scheme=source, target_scheme=target,
         )
-        return transliterate_track(text, engine, source, step.target_scheme, ctx), source
+        return transliterate_track(text, engine, source, target, ctx), source, target
 
     def _dub(self, step: DubStep, text: Track, ctx: RunContext) -> tuple[str, str]:
-        """Speak an earlier step's text and add it to the workflow's media; return (path, language)."""
+        """Speak an earlier step's text and add it to the workflow's media; return (path, language).
+
+        The path is "" when a dub already there was kept.
+        """
         language = text.language if step.language == DubbingDefaults.LANGUAGE_AUTO else step.language
         if not language:
             raise ValueError("The language of this step's input is unknown. Choose the speech language.")
@@ -176,6 +192,7 @@ class WorkflowTask(Task[WorkflowConfig]):
         dubber.load(ctx)
         path = dubber.dub(
             Track(cues=text.cues, language=language), media, None, self.config.input_path, self.config.output_dir, ctx,
+            self.config.existing,
         )
         return path, language
 
@@ -183,6 +200,8 @@ class WorkflowTask(Task[WorkflowConfig]):
         """Write one step's subtitles in the workflow's formats, noting their language."""
         cfg = self.config
         ctx.status("Writing subtitle files...")
-        files = write_track(track, cfg.input_path, suffix, cfg.formats, self._layout, cfg.output_dir)
+        files = write_track(
+            track, cfg.input_path, suffix, cfg.formats, self._layout, cfg.output_dir, cfg.existing, ctx.warn,
+        )
         languages.update(dict.fromkeys(files, track.language))
         return files

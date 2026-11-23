@@ -54,6 +54,7 @@ def get_job(job_id: str) -> dict:
         "busy": False,
         "success": result.success,
         "error": result.error,
+        "error_detail": result.error_detail,
         "output_files": result.output_files,
         "warnings": result.warnings,
     }
